@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
+using System.ServiceProcess;
 
 namespace FileserverDriveManager
 {
@@ -56,6 +57,10 @@ namespace FileserverDriveManager
         private PictureBox logoPicture;
         private bool isExiting = false;  // Flag to track if user clicked Exit button
         private bool isAuthenticating = false;  // Flag to prevent status updates during authentication
+        private bool autoMountOnStartup = true;  // Flag for auto-mount on startup when Tailscale is active
+        private bool isAuthenticated = false;  // Track authentication state
+        private string username = "";  // Cached username
+        private string password = "";  // Cached password
         private string fileserverIP = "192.168.1.26";
         private string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FileserverDriveManager.log");
         private System.Windows.Forms.Timer driveStatusTimer;  // Timer to check drive status periodically
@@ -113,28 +118,85 @@ namespace FileserverDriveManager
             // Wait a moment for Tailscale to initialize
             System.Threading.Thread.Sleep(2000);
             
-            // Check if this is first launch (no drives configured)
-            if (drives.Count == 0)
+            // Always start minimized to tray
+            this.WindowState = FormWindowState.Minimized;
+            this.ShowInTaskbar = false;
+            notifyIcon.Visible = true;
+            
+            // If auto-mount is NOT ticked - just stay minimized, do nothing
+            if (!autoMountOnStartup)
             {
-                Log("First launch - showing app for setup");
-                return;  // Show the app
+                Log("Auto-mount disabled - staying minimized");
+                return;
             }
             
-            // Check if all drives are mapped
-            bool allConnected = drives.All(d => IsDriveMounted(d.DriveLetter));
+            // Auto-mount IS ticked - proceed
+            Log("Auto-mount enabled - checking Tailscale IP...");
             
-            if (allConnected)
+            string tailscaleIP = GetTailscaleIP();
+            if (string.IsNullOrEmpty(tailscaleIP) || tailscaleIP.Contains("Not Connected"))
             {
-                // All drives connected - minimize to system tray
-                this.WindowState = FormWindowState.Minimized;
-                this.ShowInTaskbar = false;
-                notifyIcon.Visible = true;
-                Log("All drives connected - app minimized to tray");
+                Log("Tailscale IP not found - launching Tailscale...");
+                TailscaleButton_Click(null, null);  // Auto-launch Tailscale
+                
+                // Wait for Tailscale to connect (give it 10 seconds)
+                for (int i = 0; i < 10; i++)
+                {
+                    System.Threading.Thread.Sleep(1000);
+                    tailscaleIP = GetTailscaleIP();
+                    if (!string.IsNullOrEmpty(tailscaleIP) && !tailscaleIP.Contains("Not Connected"))
+                    {
+                        Log($"Tailscale connected: {tailscaleIP}");
+                        break;
+                    }
+                }
             }
             else
             {
-                // Some drives disconnected - show the app normally
-                Log("Some drives disconnected - app visible");
+                Log($"Tailscale IP already found: {tailscaleIP}");
+            }
+            
+            // Now try to authenticate and mount drives
+            if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
+            {
+                Log("Auto-authenticating with saved credentials...");
+                try
+                {
+                    if (TestFileserverConnection(username, password))
+                    {
+                        isAuthenticated = true;
+                        if (isAuthenticated)  // Use the variable to avoid warning
+                        {
+                            statusLabel.Text = "Auto-authenticated on startup";
+                        }
+                        Log("Auto-authentication successful");
+                        
+                        // Auto-mount all drives
+                        Log("Auto-mounting drives on startup...");
+                        MountAllDrives();
+                        
+                        // Give drives a moment to mount
+                        System.Threading.Thread.Sleep(3000);
+                        
+                        Log("All drives mounted - staying minimized in tray");
+                        return;  // Success - stay minimized
+                    }
+                    else
+                    {
+                        Log("Auto-authentication failed");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("Auto-authentication error: " + ex.Message);
+                    return;
+                }
+            }
+            else
+            {
+                Log("No saved credentials for auto-mount");
+                return;
             }
         }
 
@@ -154,14 +216,31 @@ namespace FileserverDriveManager
             this.StartPosition = FormStartPosition.CenterScreen;
             this.WindowState = FormWindowState.Normal;  // Start normal, not maximized
             
-            // Load favicon from generic filename in app directory
+            // Load favicon - check APPDATA first (user custom), then app directory (default)
             try
             {
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                string appDir = Path.GetDirectoryName(assembly.Location);
-                string faviconPath = Path.Combine(appDir, "icon.png");
+                string faviconPath = null;
                 
-                if (File.Exists(faviconPath))
+                // Check APPDATA for user-custom icon
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string userIconPath = Path.Combine(appDataPath, "FileserverDriveManager", "icon.png");
+                if (File.Exists(userIconPath))
+                {
+                    faviconPath = userIconPath;
+                }
+                else
+                {
+                    // Fall back to app directory (default icon)
+                    var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                    string appDir = Path.GetDirectoryName(assembly.Location);
+                    string defaultIconPath = Path.Combine(appDir, "icon.png");
+                    if (File.Exists(defaultIconPath))
+                    {
+                        faviconPath = defaultIconPath;
+                    }
+                }
+                
+                if (faviconPath != null)
                 {
                     using (Bitmap bmp = new Bitmap(faviconPath))
                     {
@@ -171,7 +250,7 @@ namespace FileserverDriveManager
             }
             catch (Exception ex)
             {
-                Log($"Error loading embedded favicon: {ex.Message}");
+                Log($"Error loading favicon: {ex.Message}");
             }
             
             // Setup system tray icon
@@ -214,7 +293,7 @@ namespace FileserverDriveManager
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));     // Add Drive (row 1)
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));     // Grid (row 2, fills remaining space)
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));     // Buttons (row 3)
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));     // Status (row 4)
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));     // Status (row 4) - increased to fit 2 lines
 
             // ===== CREDENTIALS & LOGO SECTION =====
             TableLayoutPanel credLogoTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(10, 5, 10, 5), AutoSize = false };
@@ -222,23 +301,29 @@ namespace FileserverDriveManager
             credLogoTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));   // Right side (logo, 300px wide)
             credLogoTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             
-            // Left: Credentials (stacked vertically)
-            TableLayoutPanel credStackTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 };
-            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
-            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));   // Reduced from Percent 100 to 250px
-            credStackTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50));   // Each row gets 50% of available space
-            credStackTable.RowStyles.Add(new RowStyle(SizeType.Percent, 50));   // Each row gets 50% of available space
+            // Left: Credentials (stacked vertically with Authenticate button)
+            TableLayoutPanel credStackTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2 };
+            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));  // Increased label width
+            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));   // Reduced input width
+            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));   // Authenticate button
+            credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));   // Fixed row height for username
+            credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));   // Fixed row height for password
             
-            Label usernameLabel = new Label() { Text = "Username:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 5, 0), AutoSize = false };
-            usernameBox = new TextBox() { Text = "", Multiline = false, AutoSize = false, Height = 22, BorderStyle = BorderStyle.Fixed3D, Dock = DockStyle.Fill, Font = new Font("Arial", 11) };
+            Label usernameLabel = new Label() { Text = "Username:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 5, 0), AutoSize = false, Font = new Font("Arial", 10) };
+            usernameBox = new TextBox() { Text = "", Multiline = false, AutoSize = false, BorderStyle = BorderStyle.Fixed3D, Dock = DockStyle.Fill, Font = new Font("Arial", 10) };
             
-            Label passwordLabel = new Label() { Text = "Password:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 5, 0), AutoSize = false };
-            passwordBox = new TextBox() { PasswordChar = '*', Multiline = false, AutoSize = false, Height = 22, BorderStyle = BorderStyle.Fixed3D, Dock = DockStyle.Fill, Font = new Font("Arial", 11) };
+            Label passwordLabel = new Label() { Text = "Password:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 5, 0), AutoSize = false, Font = new Font("Arial", 10) };
+            passwordBox = new TextBox() { PasswordChar = '*', Multiline = false, AutoSize = false, BorderStyle = BorderStyle.Fixed3D, Dock = DockStyle.Fill, Font = new Font("Arial", 10) };
+            
+            authenticateButton = new Button() { Text = "Authenticate", BackColor = Color.FromArgb(76, 175, 80), ForeColor = Color.White, Dock = DockStyle.Fill, Font = new Font("Arial", 10), Margin = new Padding(5, 2, 0, 2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            authenticateButton.Click += AuthenticateButton_Click;
             
             credStackTable.Controls.Add(usernameLabel, 0, 0);
             credStackTable.Controls.Add(usernameBox, 1, 0);
+            credStackTable.Controls.Add(authenticateButton, 2, 0);
             credStackTable.Controls.Add(passwordLabel, 0, 1);
             credStackTable.Controls.Add(passwordBox, 1, 1);
+            credStackTable.SetRowSpan(authenticateButton, 2);  // Button spans both rows
             
             // Right: Logo
             Panel logoPanel = new Panel() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(240, 240, 240), BorderStyle = BorderStyle.None };
@@ -246,12 +331,29 @@ namespace FileserverDriveManager
             
             try
             {
-                // Load logo from generic filename in app directory
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                string appDir = Path.GetDirectoryName(assembly.Location);
-                string logoPath = Path.Combine(appDir, "logo.png");
+                // Load logo - check APPDATA first (user custom), then app directory (default)
+                string logoPath = null;
                 
-                if (File.Exists(logoPath))
+                // Check APPDATA for user-custom logo
+                string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                string userLogoPath = Path.Combine(appDataPath, "FileserverDriveManager", "logo.png");
+                if (File.Exists(userLogoPath))
+                {
+                    logoPath = userLogoPath;
+                }
+                else
+                {
+                    // Fall back to app directory (default logo)
+                    var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                    string appDir = Path.GetDirectoryName(assembly.Location);
+                    string defaultLogoPath = Path.Combine(appDir, "logo.png");
+                    if (File.Exists(defaultLogoPath))
+                    {
+                        logoPath = defaultLogoPath;
+                    }
+                }
+                
+                if (logoPath != null)
                 {
                     logoPicture.Image = new Bitmap(logoPath);
                 }
@@ -298,27 +400,23 @@ namespace FileserverDriveManager
 
             // ===== ADD DRIVE SECTION =====
             GroupBox addDriveBox = new GroupBox() { Text = "", Dock = DockStyle.Fill, Margin = new Padding(10, 5, 10, 5) };
-            FlowLayoutPanel addFlow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = false };
+            FlowLayoutPanel addFlow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true };
 
-            Label driveLetterLabel = new Label() { Text = "Drive Letter:", AutoSize = true, Font = new Font("Arial", 11), Margin = new Padding(0, 5, 5, 0) };
-            driveLetterBox = new ComboBox() { Width = 60, Height = 22, Font = new Font("Arial", 11), DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 2, 20, 0) };
+            Label driveLetterLabel = new Label() { Text = "Drive Letter:", AutoSize = true, Font = new Font("Arial", 10), Margin = new Padding(0, 5, 5, 0) };
+            driveLetterBox = new ComboBox() { Width = 60, Height = 22, Font = new Font("Arial", 10), DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 2, 20, 0) };
             
-            Label shareNameLabel = new Label() { Text = "Share Name:", AutoSize = true, Font = new Font("Arial", 11), Margin = new Padding(0, 5, 5, 0) };
-            shareNameBox = new ComboBox() { Width = 300, Height = 22, Font = new Font("Arial", 11), DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 2, 20, 0) };
-            
-            authenticateButton = new Button() { Text = "Authenticate", BackColor = Color.FromArgb(76, 175, 80), ForeColor = Color.White, Width = 100, Height = 28, Font = new Font("Arial", 10), Margin = new Padding(0, 0, 10, 0), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
-            authenticateButton.Click += AuthenticateButton_Click;
+            Label shareNameLabel = new Label() { Text = "Share Name:", AutoSize = true, Font = new Font("Arial", 10), Margin = new Padding(0, 5, 5, 0) };
+            shareNameBox = new ComboBox() { Width = 250, Height = 22, Font = new Font("Arial", 10), DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 2, 20, 0) };
             
             addDriveButton = new Button() { Text = "Add", BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Width = 70, Height = 28, Font = new Font("Arial", 10), Margin = new Padding(0, 0, 10, 0), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Enabled = false };
             addDriveButton.Click += AddDriveButton_Click;
-            removeDriveButton = new Button() { Text = "Remove", BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Width = 70, Height = 28, Font = new Font("Arial", 10), Margin = new Padding(0, 0, 0, 0), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Enabled = false };
+            removeDriveButton = new Button() { Text = "Remove", BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Width = 90, Height = 28, Font = new Font("Arial", 10), Margin = new Padding(0, 0, 0, 0), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Enabled = false };
             removeDriveButton.Click += RemoveDriveButton_Click;
 
             addFlow.Controls.Add(driveLetterLabel);
             addFlow.Controls.Add(driveLetterBox);
             addFlow.Controls.Add(shareNameLabel);
             addFlow.Controls.Add(shareNameBox);
-            addFlow.Controls.Add(authenticateButton);
             addFlow.Controls.Add(addDriveButton);
             addFlow.Controls.Add(removeDriveButton);
             addDriveBox.Controls.Add(addFlow);
@@ -370,7 +468,7 @@ namespace FileserverDriveManager
             statusLabel = new Label() { Dock = DockStyle.Fill, Text = "Ready", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.FromArgb(21, 101, 200), Margin = new Padding(0) };
             networkLabel = new Label() { Dock = DockStyle.Fill, Text = "Network: Detecting...", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
             tailscaleIPLabel = new Label() { Dock = DockStyle.Fill, Text = "Tailscale IP: Not Connected", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
-            Label versionLabel = new Label() { Dock = DockStyle.Fill, Text = "v1.50", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 10, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
+            Label versionLabel = new Label() { Dock = DockStyle.Fill, Text = "v3.0", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 10, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
             
             statusPanel.Controls.Add(statusLabel, 0, 0);
             statusPanel.Controls.Add(networkLabel, 1, 0);
@@ -743,39 +841,51 @@ namespace FileserverDriveManager
 
         private void NetworkCheckButton_Click(object sender, EventArgs e)
         {
-            // Show Settings dialog with Network and Branding sections
+            // Show Settings dialog with Network, Branding, and Info sections
             Form settingsDialog = new Form()
             {
                 Text = "Settings",
-                Width = 500,
-                Height = 360,
+                Width = 750,
+                Height = 420,
                 StartPosition = FormStartPosition.CenterParent,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false,
                 MinimizeBox = false
             };
 
-            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(10, 10, 10, 20) };
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 130));  // Network settings
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));  // Logo/Icon buttons
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));   // Close button
+            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(10, 10, 10, 10) };
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 140));  // Network settings
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // Logo/Icon buttons only
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // Disclaimer/Copyright (fill remaining)
 
             // ===== NETWORK SETTINGS =====
             GroupBox networkBox = new GroupBox() { Text = "Network Settings", Dock = DockStyle.Fill };
-            TableLayoutPanel networkLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = new Padding(10) };
+            TableLayoutPanel networkLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, Padding = new Padding(10) };
             networkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             networkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
+            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
 
             Label ipLabel = new Label() { Text = "Fileserver IP:", TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Arial", 10) };
             TextBox ipBox = new TextBox() { Text = fileserverIP, Dock = DockStyle.Fill, Font = new Font("Arial", 10), BorderStyle = BorderStyle.Fixed3D, Margin = new Padding(0, 0, 5, 0) };
 
-            Button testButton = new Button() { Text = "Test Connection", Dock = DockStyle.Fill, BackColor = Color.FromArgb(21, 101, 200), ForeColor = Color.White, Margin = new Padding(0, 0, 5, 0), Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
-            Button saveButton = new Button() { Text = "Save IP", Dock = DockStyle.Fill, BackColor = Color.FromArgb(76, 175, 80), ForeColor = Color.White, Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            Button testButton = new Button() { Text = "Test Connection", Dock = DockStyle.Fill, BackColor = Color.FromArgb(21, 101, 200), ForeColor = Color.White, Margin = new Padding(0, 2, 5, 2), Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, AutoSize = false };
+            Button saveButton = new Button() { Text = "Save IP", Dock = DockStyle.Fill, BackColor = Color.FromArgb(76, 175, 80), ForeColor = Color.White, Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 2, 0, 2), AutoSize = false };
 
             Label statusLbl = new Label() { Text = "", TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Arial", 9) };
+
+            // Auto-mount checkbox
+            CheckBox autoMountCheckbox = new CheckBox() 
+            { 
+                Text = "Auto-mount drives when Tailscale IP is active", 
+                Checked = autoMountOnStartup,
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                Font = new Font("Arial", 9),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
 
             testButton.Click += (s, e) =>
             {
@@ -821,9 +931,10 @@ namespace FileserverDriveManager
                 }
 
                 fileserverIP = ip;
+                autoMountOnStartup = autoMountCheckbox.Checked;
                 statusLabel.Text = $"Fileserver IP changed to {ip}";
-                Log($"Fileserver IP changed to {ip}");
-                MessageBox.Show("Fileserver IP updated to: " + ip, "Success");
+                Log($"Fileserver IP changed to {ip}. Auto-mount on startup: {autoMountOnStartup}");
+                MessageBox.Show("Fileserver IP updated to: " + ip + "\nAuto-mount: " + (autoMountOnStartup ? "Enabled" : "Disabled"), "Success");
             };
 
             networkLayout.Controls.Add(ipLabel, 0, 0);
@@ -832,29 +943,52 @@ namespace FileserverDriveManager
             networkLayout.Controls.Add(saveButton, 1, 1);
             networkLayout.Controls.Add(statusLbl, 0, 2);
             networkLayout.SetColumnSpan(statusLbl, 2);
+            networkLayout.Controls.Add(autoMountCheckbox, 0, 3);
+            networkLayout.SetColumnSpan(autoMountCheckbox, 2);
 
             networkBox.Controls.Add(networkLayout);
             mainLayout.Controls.Add(networkBox, 0, 0);
 
-            // ===== BRANDING SETTINGS =====
-            GroupBox brandingBox = new GroupBox() { Text = "Branding", Dock = DockStyle.Fill };
-            FlowLayoutPanel brandingLayout = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(10) };
+            // ===== BRANDING BUTTONS =====
+            GroupBox brandingBox = new GroupBox() { Text = "", Dock = DockStyle.Fill, Padding = new Padding(0) };
+            TableLayoutPanel brandingLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(10, 5, 10, 5), AutoSize = false };
+            brandingLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            brandingLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            brandingLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+            brandingLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            Button logoButton = new Button() { Text = "Change Logo", BackColor = Color.FromArgb(156, 39, 176), ForeColor = Color.White, Width = 130, Height = 40, Font = new Font("Arial", 10), Margin = new Padding(5), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
-            Button iconButton = new Button() { Text = "Change Icon", BackColor = Color.FromArgb(233, 30, 99), ForeColor = Color.White, Width = 130, Height = 40, Font = new Font("Arial", 10), Margin = new Padding(5), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            Button logoButton = new Button() { Text = "Change Logo", BackColor = Color.FromArgb(156, 39, 176), ForeColor = Color.White, Dock = DockStyle.Fill, Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0), AutoSize = false };
+            Button iconButton = new Button() { Text = "Change Icon", BackColor = Color.FromArgb(233, 30, 99), ForeColor = Color.White, Dock = DockStyle.Fill, Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0), AutoSize = false };
+            Button closeButton = new Button() { Text = "Close", BackColor = Color.FromArgb(158, 158, 158), ForeColor = Color.White, Dock = DockStyle.Fill, Font = new Font("Arial", 9), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 0, 0), AutoSize = false };
 
             logoButton.Click += (s, e) => LogoPicture_Click(s, e);
             iconButton.Click += (s, e) => FaviconButton_Click(s, e);
+            closeButton.Click += (s, e) => settingsDialog.Close();
 
-            brandingLayout.Controls.Add(logoButton);
-            brandingLayout.Controls.Add(iconButton);
+            brandingLayout.Controls.Add(logoButton, 0, 0);
+            brandingLayout.Controls.Add(iconButton, 1, 0);
+            brandingLayout.Controls.Add(closeButton, 2, 0);
             brandingBox.Controls.Add(brandingLayout);
             mainLayout.Controls.Add(brandingBox, 0, 1);
 
-            // ===== CLOSE BUTTON =====
-            Button closeButton = new Button() { Text = "Close", Dock = DockStyle.Fill, BackColor = Color.FromArgb(158, 158, 158), ForeColor = Color.White, Font = new Font("Arial", 11), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
-            closeButton.Click += (s, e) => settingsDialog.Close();
-            mainLayout.Controls.Add(closeButton, 0, 2);
+            // ===== DISCLAIMER & COPYRIGHT =====
+            GroupBox infoBox = new GroupBox() { Text = "Information", Dock = DockStyle.Fill };
+            TableLayoutPanel infoLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Padding = new Padding(10) };
+            infoLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            Label infoLabel = new Label() 
+            { 
+                Text = "⚠ Disclaimer: This tool manages network drive connections. Always verify credentials before saving.\n\n© 2026 Groblers CSS. All rights reserved.\nThis application is provided as-is for authorized users only.\nUnauthorized access or distribution is prohibited.", 
+                TextAlign = ContentAlignment.TopLeft, 
+                Font = new Font("Arial", 8), 
+                ForeColor = Color.Gray,
+                Dock = DockStyle.Fill,
+                AutoSize = false
+            };
+
+            infoLayout.Controls.Add(infoLabel, 0, 0);
+            infoBox.Controls.Add(infoLayout);
+            mainLayout.Controls.Add(infoBox, 0, 2);
 
             mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             settingsDialog.Controls.Add(mainLayout);
@@ -1611,8 +1745,25 @@ Main
         [STAThread]
         static void Main()
         {
+            // Prevent multiple instances
+            string mutexName = "FileserverDriveManager_SingleInstance";
+            bool createdNew;
+            System.Threading.Mutex mutex = new System.Threading.Mutex(true, mutexName, out createdNew);
+            
+            if (!createdNew)
+            {
+                // Another instance is already running
+                MessageBox.Show("Fileserver Drive Manager is already running.", "Application Running", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            
+            // Disable DPI scaling to prevent font size issues at 125%
             Application.EnableVisualStyles();
+            Application.SetHighDpiMode(HighDpiMode.SystemAware);
             Application.Run(new MainForm());
+            
+            mutex.ReleaseMutex();
+            mutex.Dispose();
         }
     }
 
@@ -1631,8 +1782,11 @@ Main
                 {
                     try
                     {
-                        string appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-                        string logoPath = Path.Combine(appDir, "logo.png");
+                        // Save to APPDATA instead of Program Files (no permission issues)
+                        string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                        string appDataDir = Path.Combine(appDataPath, "FileserverDriveManager");
+                        Directory.CreateDirectory(appDataDir);
+                        string logoPath = Path.Combine(appDataDir, "logo.png");
                         
                         // Read selected file into memory as byte array
                         byte[] imageData = File.ReadAllBytes(ofd.FileName);
@@ -1687,8 +1841,11 @@ Main
                 {
                     try
                     {
-                        string appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-                        string iconPath = Path.Combine(appDir, "icon.png");
+                        // Save to APPDATA instead of Program Files (no permission issues)
+                        string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                        string appDataDir = Path.Combine(appDataPath, "FileserverDriveManager");
+                        Directory.CreateDirectory(appDataDir);
+                        string iconPath = Path.Combine(appDataDir, "icon.png");
                         
                         // Read selected file into memory as byte array
                         byte[] imageData = File.ReadAllBytes(ofd.FileName);
@@ -1733,6 +1890,111 @@ Main
                     }
                 }
             }
+        }
+
+        private bool TestFileserverConnection(string user, string pass)
+        {
+            try
+            {
+                string unc = $"\\\\{fileserverIP}\\General";
+                var dirs = System.IO.Directory.GetDirectories(unc);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void MountAllDrives()
+        {
+            foreach (var drive in drives)
+            {
+                MountDrive(drive.DriveLetter, drive.ShareName);
+            }
+        }
+
+        private void MountDrive(string driveLetter, string shareName)
+        {
+            try
+            {
+                string uncPath = $"\\\\{fileserverIP}\\{shareName}";
+                ProcessStartInfo psi = new ProcessStartInfo("net", $"use {driveLetter}: {uncPath} /persistent:yes")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using (var process = System.Diagnostics.Process.Start(psi))
+                {
+                    process.WaitForExit();
+                }
+                Log($"Mounted {driveLetter}: to {shareName}");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error mounting {driveLetter}: {ex.Message}");
+            }
+        }
+
+        private string GetTailscaleIP()
+        {
+            try
+            {
+                // Run tailscale status to get IP (same as UpdateTailscaleIP does)
+                Process p = new Process();
+                p.StartInfo.FileName = "C:\\Program Files\\Tailscale\\tailscale.exe";
+                p.StartInfo.Arguments = "status";
+                p.StartInfo.UseShellExecute = false;
+                p.StartInfo.RedirectStandardOutput = true;
+                p.StartInfo.RedirectStandardError = true;
+                p.StartInfo.CreateNoWindow = true;
+                p.Start();
+                
+                string output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit();
+                
+                // Look for any line with 100. (Tailscale IP range)
+                if (output.Contains("100."))
+                {
+                    string[] lines = output.Split('\n');
+                    foreach (string line in lines)
+                    {
+                        if (line.Contains("100."))
+                        {
+                            // Extract the IP - find first 100.x.x.x pattern
+                            int idx = line.IndexOf("100.");
+                            if (idx >= 0)
+                            {
+                                string potential = line.Substring(idx);
+                                // Get just the IP part (stop at space, bracket, or end)
+                                int endIdx = 0;
+                                for (int i = 0; i < potential.Length; i++)
+                                {
+                                    if (char.IsDigit(potential[i]) || potential[i] == '.')
+                                    {
+                                        endIdx = i + 1;
+                                    }
+                                    else
+                                    {
+                                        break;
+                                    }
+                                }
+                                if (endIdx > 0)
+                                {
+                                    return potential.Substring(0, endIdx);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Silently fail
+            }
+            
+            return null;
         }
     }
 }
