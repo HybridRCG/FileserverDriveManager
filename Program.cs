@@ -100,9 +100,12 @@ namespace FileserverDriveManager
                         if (existingValue == null)
                         {
                             // Not enabled yet - add it
-                            string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                            key.SetValue("FileserverDriveManager", exePath);
-                            Log("Auto-startup enabled");
+                            // Get the full path to the current executable
+                            string exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                            // Wrap in quotes in case there are spaces in the path
+                            string registryValue = $"\"{exePath}\"";
+                            key.SetValue("FileserverDriveManager", registryValue);
+                            Log($"Auto-startup enabled with path: {registryValue}");
                         }
                     }
                 }
@@ -468,7 +471,7 @@ namespace FileserverDriveManager
             statusLabel = new Label() { Dock = DockStyle.Fill, Text = "Ready", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.FromArgb(21, 101, 200), Margin = new Padding(0) };
             networkLabel = new Label() { Dock = DockStyle.Fill, Text = "Network: Detecting...", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
             tailscaleIPLabel = new Label() { Dock = DockStyle.Fill, Text = "Tailscale IP: Not Connected", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
-            Label versionLabel = new Label() { Dock = DockStyle.Fill, Text = "v3.0", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 10, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
+            Label versionLabel = new Label() { Dock = DockStyle.Fill, Text = "v3.1", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 10, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
             
             statusPanel.Controls.Add(statusLabel, 0, 0);
             statusPanel.Controls.Add(networkLabel, 1, 0);
@@ -932,6 +935,7 @@ namespace FileserverDriveManager
 
                 fileserverIP = ip;
                 autoMountOnStartup = autoMountCheckbox.Checked;
+                SaveCurrentSettings();  // Save to disk
                 statusLabel.Text = $"Fileserver IP changed to {ip}";
                 Log($"Fileserver IP changed to {ip}. Auto-mount on startup: {autoMountOnStartup}");
                 MessageBox.Show("Fileserver IP updated to: " + ip + "\nAuto-mount: " + (autoMountOnStartup ? "Enabled" : "Disabled"), "Success");
@@ -1196,6 +1200,9 @@ namespace FileserverDriveManager
                 }
                 settings["drives"] = drivesList;
                 
+                // Save auto-mount setting
+                settings["autoMountOnStartup"] = autoMountOnStartup;
+                
                 // Save Tailscale state
                 settings["tailscale_enabled"] = true;
                 settings["tailscale_connected_at"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -1233,7 +1240,7 @@ namespace FileserverDriveManager
                         // Load username
                         if (settings.ContainsKey("username"))
                         {
-                            string username = settings["username"].GetString() ?? "";
+                            username = settings["username"].GetString() ?? "";
                             usernameBox.Text = username;
                             Log($"Loaded username: {username}");
                         }
@@ -1246,9 +1253,9 @@ namespace FileserverDriveManager
                         if (settings.ContainsKey("password"))
                         {
                             string encryptedPassword = settings["password"].GetString() ?? "";
-                            string decryptedPassword = DecryptPassword(encryptedPassword);
-                            passwordBox.Text = decryptedPassword;
-                            Log($"Loaded password: {'*' + new string('*', decryptedPassword.Length - 1)}");
+                            password = DecryptPassword(encryptedPassword);
+                            passwordBox.Text = password;
+                            Log($"Loaded password: {'*' + new string('*', password.Length - 1)}");
                         }
                         else
                         {
@@ -1280,6 +1287,18 @@ namespace FileserverDriveManager
                         else
                         {
                             Log("No 'drives' key in settings");
+                        }
+                        
+                        // Load auto-mount setting
+                        if (settings.ContainsKey("autoMountOnStartup"))
+                        {
+                            autoMountOnStartup = settings["autoMountOnStartup"].GetBoolean();
+                            Log($"Loaded autoMountOnStartup: {autoMountOnStartup}");
+                        }
+                        else
+                        {
+                            Log("No 'autoMountOnStartup' key in settings - using default: true");
+                            autoMountOnStartup = true;
                         }
                         
                         // Check for Tailscale settings
@@ -1896,12 +1915,35 @@ Main
         {
             try
             {
+                // First, try to authenticate to the fileserver
                 string unc = $"\\\\{fileserverIP}\\General";
-                var dirs = System.IO.Directory.GetDirectories(unc);
-                return true;
+                ProcessStartInfo psi = new ProcessStartInfo("net", $"use {unc} /user:{user} {pass}")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                
+                using (var process = System.Diagnostics.Process.Start(psi))
+                {
+                    process.WaitForExit();
+                    if (process.ExitCode == 0)
+                    {
+                        Log($"Successfully authenticated to {fileserverIP} as {user}");
+                        return true;
+                    }
+                    else
+                    {
+                        string error = process.StandardError.ReadToEnd();
+                        Log($"Authentication failed: {error}");
+                        return false;
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                Log($"TestFileserverConnection error: {ex.Message}");
                 return false;
             }
         }
