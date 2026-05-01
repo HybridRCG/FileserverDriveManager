@@ -13,17 +13,6 @@ using Microsoft.Win32;
 
 namespace FileserverDriveManager
 {
-    static class Program
-    {
-        [STAThread]
-        static void Main()
-        {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
-        }
-    }
-
     public class DriveMapping
     {
         public string DriveLetter { get; set; }
