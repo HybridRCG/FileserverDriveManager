@@ -113,7 +113,7 @@ jobs:
       shell: pwsh
     
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ steps.get_version.outputs.VERSION }}
         name: Fileserver Drive Manager v${{ steps.get_version.outputs.VERSION }}
@@ -136,5 +136,7 @@ jobs:
           - Tailscale or NetBird VPN (optional)
         files: |
           Drive Manager V${{ steps.get_version.outputs.VERSION }}.exe
+        fail_on_unmatched_files: true
+        make_latest: "true"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

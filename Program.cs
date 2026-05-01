@@ -22,7 +22,7 @@ namespace FileserverDriveManager
 
     public partial class MainForm : Form
     {
-        private const string APP_VERSION = "v3.8";
+        private const string APP_VERSION = "v3.9";
         
         private List<DriveMapping> drives = new List<DriveMapping>();
         private TextBox usernameBox;
