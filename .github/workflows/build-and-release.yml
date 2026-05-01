@@ -92,8 +92,9 @@ jobs:
       shell: pwsh
     
     - name: Build NSIS installer
-      run: makensis installer.nsi
-      shell: cmd
+      run: |
+        & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+      shell: pwsh
     
     - name: Verify installer created
       run: |
