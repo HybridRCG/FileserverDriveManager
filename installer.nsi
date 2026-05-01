@@ -57,8 +57,6 @@ Section "Install"
     
     ; Copy executable and resources
     File "bin\Release\net8.0-windows\win-x64\publish\${APP_EXE}"
-    File "logo.png"
-    File "icon.png"
     File "icon.ico"
     
     ; Create uninstaller
