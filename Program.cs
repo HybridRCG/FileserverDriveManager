@@ -192,8 +192,8 @@ namespace FileserverDriveManager
             // === MODERN DESIGN CONSTANTS ===
             Font modernFont = new Font("Segoe UI", 9.5F, FontStyle.Regular);
             Font modernFontBold = new Font("Segoe UI", 9.5F, FontStyle.Bold);
-            Font headerFont = new Font("Segoe UI", 11F, FontStyle.Semibold);
-            Font statusFont = new Font("Segoe UI", 8.5F);
+            Font headerFont = new Font("Segoe UI", 11F, FontStyle.Bold);
+            Font statusFont = new Font("Segoe UI", 8.5F, FontStyle.Regular);
             
             Color primaryBlue = Color.FromArgb(0, 120, 212);        // Modern Windows blue
             Color successGreen = Color.FromArgb(16, 124, 16);       // Success green
