@@ -33,3 +33,7 @@ Thumbs.db
 
 # Archives
 archive/
+
+# Backup/partial files
+Program_ENDING.cs
+Program_*.cs
