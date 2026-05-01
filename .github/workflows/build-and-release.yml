@@ -54,11 +54,14 @@ jobs:
     
     - name: Publish self-contained executable
       run: |
-        dotnet publish -c Release -r win-x64 --self-contained true `
+        dotnet publish -c Release -r win-x64 `
+          --self-contained true `
           -p:PublishSingleFile=true `
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:IncludeAllContentForSelfExtract=true `
-          -p:EnableCompressionInSingleFile=true
+          -p:EnableCompressionInSingleFile=true `
+          -p:PublishReadyToRun=false `
+          -p:PublishTrimmed=false
       shell: pwsh
     
     - name: Wait for file unlock
