@@ -8,6 +8,8 @@ using System.Drawing;
 using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Microsoft.Win32;
 
 namespace FileserverDriveManager
 {
