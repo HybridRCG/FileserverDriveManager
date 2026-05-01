@@ -22,7 +22,7 @@ namespace FileserverDriveManager
 
     public partial class MainForm : Form
     {
-        private const string APP_VERSION = "v3.9";
+        private const string APP_VERSION = "v4.0";
         
         private List<DriveMapping> drives = new List<DriveMapping>();
         private TextBox usernameBox;
@@ -189,13 +189,31 @@ namespace FileserverDriveManager
         }
         private void InitializeComponents()
         {
+            // === MODERN DESIGN CONSTANTS ===
+            Font modernFont = new Font("Segoe UI", 9.5F, FontStyle.Regular);
+            Font modernFontBold = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+            Font headerFont = new Font("Segoe UI", 11F, FontStyle.Semibold);
+            Font statusFont = new Font("Segoe UI", 8.5F);
+            
+            Color primaryBlue = Color.FromArgb(0, 120, 212);        // Modern Windows blue
+            Color successGreen = Color.FromArgb(16, 124, 16);       // Success green
+            Color dangerRed = Color.FromArgb(196, 43, 28);          // Danger red
+            Color neutralGray = Color.FromArgb(96, 94, 92);         // Neutral gray
+            Color bgLight = Color.FromArgb(243, 242, 241);          // Light background
+            Color bgWhite = Color.FromArgb(255, 255, 255);          // Pure white
+            Color borderGray = Color.FromArgb(225, 223, 221);       // Border color
+            Color textPrimary = Color.FromArgb(50, 49, 48);         // Primary text
+            Color textSecondary = Color.FromArgb(96, 94, 92);       // Secondary text
+            
             this.Text = $"Dyna Training - Fileserver Drive Manager {APP_VERSION}";
-            this.Size = new Size(900, 520);
+            this.Size = new Size(950, 580);
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.MaximizeBox = true;
             this.MinimizeBox = true;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.WindowState = FormWindowState.Normal;
+            this.BackColor = bgLight;
+            this.Font = modernFont;
             
             // Load favicon
             try
@@ -260,37 +278,53 @@ namespace FileserverDriveManager
                 }
             };
 
-            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill };
+            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, Padding = new Padding(12) };
             mainLayout.ColumnCount = 1;
             mainLayout.RowCount = 5;
             mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 75));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
 
             // ===== CREDENTIALS & LOGO SECTION =====
-            TableLayoutPanel credLogoTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(10, 5, 10, 5), AutoSize = false };
+            Panel credLogoPanel = new Panel() { Dock = DockStyle.Fill, BackColor = bgWhite, Margin = new Padding(0, 0, 0, 8) };
+            credLogoPanel.Paint += (s, e) => {
+                ControlPaint.DrawBorder(e.Graphics, credLogoPanel.ClientRectangle, borderGray, ButtonBorderStyle.Solid);
+            };
+            
+            TableLayoutPanel credLogoTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(16), BackColor = bgWhite };
             credLogoTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            credLogoTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
+            credLogoTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280));
             credLogoTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             
             // Left: Credentials
-            TableLayoutPanel credStackTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2 };
-            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200));
-            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-            credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            TableLayoutPanel credStackTable = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2, BackColor = bgWhite };
+            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
+            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            credStackTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             
-            Label usernameLabel = new Label() { Text = "Username:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 5, 0), AutoSize = false, Font = new Font("Arial", 10) };
-            usernameBox = new TextBox() { Text = "", Multiline = false, AutoSize = false, BorderStyle = BorderStyle.Fixed3D, Dock = DockStyle.Fill, Font = new Font("Arial", 10) };
+            Label usernameLabel = new Label() { Text = "Username:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 10, 0), Font = modernFont, ForeColor = textPrimary };
+            usernameBox = new TextBox() { Dock = DockStyle.Fill, Font = modernFont, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 4, 8, 4) };
             
-            Label passwordLabel = new Label() { Text = "Password:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 5, 0), AutoSize = false, Font = new Font("Arial", 10) };
-            passwordBox = new TextBox() { PasswordChar = '*', Multiline = false, AutoSize = false, BorderStyle = BorderStyle.Fixed3D, Dock = DockStyle.Fill, Font = new Font("Arial", 10) };
+            Label passwordLabel = new Label() { Text = "Password:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 10, 0), Font = modernFont, ForeColor = textPrimary };
+            passwordBox = new TextBox() { PasswordChar = '●', Dock = DockStyle.Fill, Font = modernFont, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 4, 8, 4) };
             
-            authenticateButton = new Button() { Text = "Authenticate", BackColor = Color.FromArgb(76, 175, 80), ForeColor = Color.White, Dock = DockStyle.Fill, Font = new Font("Arial", 10), Margin = new Padding(5, 2, 0, 2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            authenticateButton = new Button() { 
+                Text = "Authenticate", 
+                BackColor = primaryBlue, 
+                ForeColor = Color.White, 
+                Dock = DockStyle.Fill, 
+                Font = modernFontBold, 
+                Margin = new Padding(0, 4, 0, 4), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat,
+                TabStop = true
+            };
+            authenticateButton.FlatAppearance.BorderSize = 0;
             authenticateButton.Click += AuthenticateButton_Click;
             
             credStackTable.Controls.Add(usernameLabel, 0, 0);
@@ -301,8 +335,8 @@ namespace FileserverDriveManager
             credStackTable.SetRowSpan(authenticateButton, 2);
             
             // Right: Logo
-            Panel logoPanel = new Panel() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(240, 240, 240), BorderStyle = BorderStyle.None };
-            logoPicture = new PictureBox() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(240, 240, 240) };
+            Panel logoPanel = new Panel() { Dock = DockStyle.Fill, BackColor = bgLight, Margin = new Padding(12, 0, 0, 0) };
+            logoPicture = new PictureBox() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = bgLight };
             
             try
             {
@@ -330,32 +364,58 @@ namespace FileserverDriveManager
             }
             catch (Exception ex)
             {
-                logoPicture.BackColor = Color.Red;
-                logoPicture.Text = "Error: " + ex.Message;
+                Log("Error loading logo: " + ex.Message);
             }
             
             logoPanel.Controls.Add(logoPicture);
             
             credLogoTable.Controls.Add(credStackTable, 0, 0);
             credLogoTable.Controls.Add(logoPanel, 1, 0);
-            
-            GroupBox credLogoBox = new GroupBox() { Text = "", Dock = DockStyle.Fill, Margin = new Padding(10, 5, 10, 5) };
-            credLogoBox.Controls.Add(credLogoTable);
-            mainLayout.Controls.Add(credLogoBox, 0, 0);
+            credLogoPanel.Controls.Add(credLogoTable);
+            mainLayout.Controls.Add(credLogoPanel, 0, 0);
 
             // ===== ADD DRIVE SECTION =====
-            GroupBox addDriveBox = new GroupBox() { Text = "", Dock = DockStyle.Fill, Margin = new Padding(10, 5, 10, 5) };
-            FlowLayoutPanel addFlow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true };
+            Panel addDrivePanel = new Panel() { Dock = DockStyle.Fill, BackColor = bgWhite, Margin = new Padding(0, 0, 0, 8) };
+            addDrivePanel.Paint += (s, e) => {
+                ControlPaint.DrawBorder(e.Graphics, addDrivePanel.ClientRectangle, borderGray, ButtonBorderStyle.Solid);
+            };
+            
+            FlowLayoutPanel addFlow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(16, 12, 16, 12), BackColor = bgWhite };
 
-            Label driveLetterLabel = new Label() { Text = "Drive Letter:", AutoSize = true, Font = new Font("Arial", 10), Margin = new Padding(0, 5, 5, 0) };
-            driveLetterBox = new ComboBox() { Width = 60, Height = 22, Font = new Font("Arial", 10), DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 2, 20, 0), Enabled = false };
+            Label driveLetterLabel = new Label() { Text = "Drive Letter:", AutoSize = true, Font = modernFont, Margin = new Padding(0, 8, 8, 0), ForeColor = textPrimary };
+            driveLetterBox = new ComboBox() { Width = 70, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Flat };
             
-            Label shareNameLabel = new Label() { Text = "Share Name:", AutoSize = true, Font = new Font("Arial", 10), Margin = new Padding(0, 5, 5, 0) };
-            shareNameBox = new ComboBox() { Width = 250, Height = 22, Font = new Font("Arial", 10), DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 2, 20, 0), Enabled = false };
+            Label shareNameLabel = new Label() { Text = "Share Name:", AutoSize = true, Font = modernFont, Margin = new Padding(0, 8, 8, 0), ForeColor = textPrimary };
+            shareNameBox = new ComboBox() { Width = 280, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Flat };
             
-            addDriveButton = new Button() { Text = "Add", BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Width = 70, Height = 28, Font = new Font("Arial", 10), Margin = new Padding(0, 0, 10, 0), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Enabled = false };
+            addDriveButton = new Button() { 
+                Text = "Add Drive", 
+                BackColor = neutralGray, 
+                ForeColor = Color.White, 
+                Width = 90, 
+                Height = 32, 
+                Font = modernFontBold, 
+                Margin = new Padding(0, 2, 10, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat, 
+                Enabled = false 
+            };
+            addDriveButton.FlatAppearance.BorderSize = 0;
             addDriveButton.Click += AddDriveButton_Click;
-            removeDriveButton = new Button() { Text = "Remove", BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Width = 90, Height = 28, Font = new Font("Arial", 10), Margin = new Padding(0, 0, 0, 0), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Enabled = false };
+            
+            removeDriveButton = new Button() { 
+                Text = "Remove", 
+                BackColor = neutralGray, 
+                ForeColor = Color.White, 
+                Width = 90, 
+                Height = 32, 
+                Font = modernFontBold, 
+                Margin = new Padding(0, 2, 0, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat, 
+                Enabled = false 
+            };
+            removeDriveButton.FlatAppearance.BorderSize = 0;
             removeDriveButton.Click += RemoveDriveButton_Click;
 
             addFlow.Controls.Add(driveLetterLabel);
@@ -364,38 +424,131 @@ namespace FileserverDriveManager
             addFlow.Controls.Add(shareNameBox);
             addFlow.Controls.Add(addDriveButton);
             addFlow.Controls.Add(removeDriveButton);
-            addDriveBox.Controls.Add(addFlow);
-            mainLayout.Controls.Add(addDriveBox, 0, 1);
+            addDrivePanel.Controls.Add(addFlow);
+            mainLayout.Controls.Add(addDrivePanel, 0, 1);
 
             // ===== DRIVES GRID =====
-            GroupBox gridBox = new GroupBox() { Text = "", Dock = DockStyle.Fill, Margin = new Padding(10, 5, 10, 5) };
-            drivesGrid = new DataGridView() { Dock = DockStyle.Fill, AutoGenerateColumns = false, AllowUserToAddRows = false, AllowUserToDeleteRows = false, ReadOnly = true, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, Height = 150 };
-            drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Drive", DataPropertyName = "DriveLetter", Width = 80, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
-            drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Share", DataPropertyName = "ShareName", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-            drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Status", DataPropertyName = "Status", Width = 100, AutoSizeMode = DataGridViewAutoSizeColumnMode.None });
-            gridBox.Controls.Add(drivesGrid);
-            mainLayout.Controls.Add(gridBox, 0, 2);
+            Panel gridPanel = new Panel() { Dock = DockStyle.Fill, BackColor = bgWhite, Margin = new Padding(0, 0, 0, 8) };
+            gridPanel.Paint += (s, e) => {
+                ControlPaint.DrawBorder(e.Graphics, gridPanel.ClientRectangle, borderGray, ButtonBorderStyle.Solid);
+            };
+            
+            drivesGrid = new DataGridView() { 
+                Dock = DockStyle.Fill, 
+                AutoGenerateColumns = false, 
+                AllowUserToAddRows = false, 
+                AllowUserToDeleteRows = false, 
+                ReadOnly = true, 
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect, 
+                RowHeadersVisible = false,
+                BackgroundColor = bgWhite,
+                BorderStyle = BorderStyle.None,
+                GridColor = borderGray,
+                Font = modernFont,
+                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle() { 
+                    BackColor = bgLight, 
+                    ForeColor = textPrimary, 
+                    Font = modernFontBold,
+                    Padding = new Padding(8, 4, 8, 4)
+                },
+                DefaultCellStyle = new DataGridViewCellStyle() { 
+                    BackColor = bgWhite, 
+                    ForeColor = textPrimary,
+                    SelectionBackColor = Color.FromArgb(0, 120, 212, 40),
+                    SelectionForeColor = textPrimary,
+                    Padding = new Padding(8, 4, 8, 4)
+                },
+                RowTemplate = { Height = 36 },
+                Margin = new Padding(1)
+            };
+            drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Drive", DataPropertyName = "DriveLetter", Width = 100 });
+            drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Share Name", DataPropertyName = "ShareName", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+            drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Status", DataPropertyName = "Status", Width = 140 });
+            gridPanel.Controls.Add(drivesGrid);
+            mainLayout.Controls.Add(gridPanel, 0, 2);
 
             // ===== ACTION BUTTONS =====
-            TableLayoutPanel buttonPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 1, Margin = new Padding(10, 5, 10, 5) };
-            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100/6));
-            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100/6));
-            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100/6));
-            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100/6));
-            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100/6));
-            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100/6));
+            TableLayoutPanel buttonPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 1, Margin = new Padding(0, 0, 0, 8) };
+            for (int i = 0; i < 6; i++)
+                buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f/6f));
 
-            mountDrivesButton = new Button() { Text = "Mount Drives", Dock = DockStyle.Fill, BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Margin = new Padding(2), Enabled = false, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            mountDrivesButton = new Button() { 
+                Text = "Mount All", 
+                Dock = DockStyle.Fill, 
+                BackColor = neutralGray, 
+                ForeColor = Color.White, 
+                Font = modernFontBold,
+                Margin = new Padding(0, 0, 4, 0), 
+                Enabled = false, 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat 
+            };
+            mountDrivesButton.FlatAppearance.BorderSize = 0;
             mountDrivesButton.Click += MountDrivesButton_Click;
-            settingsButton = new Button() { Text = "Settings", Dock = DockStyle.Fill, BackColor = Color.FromArgb(33, 150, 243), ForeColor = Color.White, Margin = new Padding(2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            
+            settingsButton = new Button() { 
+                Text = "Settings", 
+                Dock = DockStyle.Fill, 
+                BackColor = primaryBlue, 
+                ForeColor = Color.White, 
+                Font = modernFontBold,
+                Margin = new Padding(2, 0, 2, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat 
+            };
+            settingsButton.FlatAppearance.BorderSize = 0;
             settingsButton.Click += SettingsButton_Click;
-            viewLogsButton = new Button() { Text = "Logs", Dock = DockStyle.Fill, BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Black, Margin = new Padding(2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            
+            viewLogsButton = new Button() { 
+                Text = "View Logs", 
+                Dock = DockStyle.Fill, 
+                BackColor = bgLight, 
+                ForeColor = textPrimary, 
+                Font = modernFontBold,
+                Margin = new Padding(2, 0, 2, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat 
+            };
+            viewLogsButton.FlatAppearance.BorderColor = borderGray;
             viewLogsButton.Click += ViewLogsButton_Click;
-            tailscaleButton = new Button() { Text = "Tailscale", Dock = DockStyle.Fill, BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Black, Margin = new Padding(2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            
+            tailscaleButton = new Button() { 
+                Text = "Tailscale", 
+                Dock = DockStyle.Fill, 
+                BackColor = bgLight, 
+                ForeColor = textPrimary, 
+                Font = modernFontBold,
+                Margin = new Padding(2, 0, 2, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat 
+            };
+            tailscaleButton.FlatAppearance.BorderColor = borderGray;
             tailscaleButton.Click += TailscaleButton_Click;
-            netbirdButton = new Button() { Text = "NetBird", Dock = DockStyle.Fill, BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Black, Margin = new Padding(2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            
+            netbirdButton = new Button() { 
+                Text = "NetBird", 
+                Dock = DockStyle.Fill, 
+                BackColor = bgLight, 
+                ForeColor = textPrimary, 
+                Font = modernFontBold,
+                Margin = new Padding(2, 0, 2, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat 
+            };
+            netbirdButton.FlatAppearance.BorderColor = borderGray;
             netbirdButton.Click += NetBirdButton_Click;
-            exitButton = new Button() { Text = "Exit", Dock = DockStyle.Fill, BackColor = Color.FromArgb(229, 57, 53), ForeColor = Color.White, Margin = new Padding(2), Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            
+            exitButton = new Button() { 
+                Text = "Exit", 
+                Dock = DockStyle.Fill, 
+                BackColor = dangerRed, 
+                ForeColor = Color.White, 
+                Font = modernFontBold,
+                Margin = new Padding(4, 0, 0, 0), 
+                Cursor = Cursors.Hand, 
+                FlatStyle = FlatStyle.Flat 
+            };
+            exitButton.FlatAppearance.BorderSize = 0;
             exitButton.Click += (s, e) => { isExiting = true; this.Close(); };
 
             buttonPanel.Controls.Add(mountDrivesButton, 0, 0);
@@ -407,26 +560,76 @@ namespace FileserverDriveManager
             mainLayout.Controls.Add(buttonPanel, 0, 3);
 
             // ===== STATUS BAR =====
-            TableLayoutPanel statusPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1 };
-            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
-            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
-            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
-            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
-            statusPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            Panel statusBarPanel = new Panel() { Dock = DockStyle.Fill, BackColor = bgLight };
+            statusBarPanel.Paint += (s, e) => {
+                e.Graphics.DrawLine(new Pen(borderGray), 0, 0, statusBarPanel.Width, 0);
+            };
             
-            statusLabel = new Label() { Dock = DockStyle.Fill, Text = "Ready", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 0, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.FromArgb(21, 101, 200), Margin = new Padding(0) };
-            lanIPLabel = new Label() { Dock = DockStyle.Fill, Text = "Network: Detecting...", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 8) };
-            tailscaleIPLabel = new Label() { Dock = DockStyle.Fill, Text = "Tailscale: Not Connected", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 8) };
-            netbirdIPLabel = new Label() { Dock = DockStyle.Fill, Text = "NetBird: Not Connected", BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleCenter, Padding = new Padding(0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 8) };
-            Label versionLabel = new Label() { Dock = DockStyle.Fill, Text = APP_VERSION, BorderStyle = BorderStyle.None, TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, 0, 10, 0), BackColor = Color.FromArgb(240, 240, 240), ForeColor = Color.Gray, Font = new Font("Arial", 9) };
+            TableLayoutPanel statusPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, BackColor = bgLight, Padding = new Padding(0, 8, 0, 0) };
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+            
+            statusLabel = new Label() { 
+                Dock = DockStyle.Fill, 
+                Text = "Ready", 
+                TextAlign = ContentAlignment.MiddleLeft, 
+                Padding = new Padding(4, 0, 0, 0), 
+                BackColor = bgLight, 
+                ForeColor = primaryBlue, 
+                Font = statusFont,
+                AutoEllipsis = true
+            };
+            
+            lanIPLabel = new Label() { 
+                Dock = DockStyle.Fill, 
+                Text = "Network: Detecting...", 
+                TextAlign = ContentAlignment.MiddleCenter, 
+                BackColor = bgLight, 
+                ForeColor = textSecondary, 
+                Font = statusFont,
+                AutoEllipsis = true
+            };
+            
+            tailscaleIPLabel = new Label() { 
+                Dock = DockStyle.Fill, 
+                Text = "Tailscale: Not Connected", 
+                TextAlign = ContentAlignment.MiddleCenter, 
+                BackColor = bgLight, 
+                ForeColor = textSecondary, 
+                Font = statusFont,
+                AutoEllipsis = true
+            };
+            
+            netbirdIPLabel = new Label() { 
+                Dock = DockStyle.Fill, 
+                Text = "NetBird: Not Connected", 
+                TextAlign = ContentAlignment.MiddleCenter, 
+                BackColor = bgLight, 
+                ForeColor = textSecondary, 
+                Font = statusFont,
+                AutoEllipsis = true
+            };
+            
+            Label versionLabel = new Label() { 
+                Dock = DockStyle.Fill, 
+                Text = APP_VERSION, 
+                TextAlign = ContentAlignment.MiddleRight, 
+                Padding = new Padding(0, 0, 4, 0), 
+                BackColor = bgLight, 
+                ForeColor = textSecondary, 
+                Font = statusFont 
+            };
             
             statusPanel.Controls.Add(statusLabel, 0, 0);
             statusPanel.Controls.Add(lanIPLabel, 1, 0);
             statusPanel.Controls.Add(tailscaleIPLabel, 2, 0);
             statusPanel.Controls.Add(netbirdIPLabel, 3, 0);
             statusPanel.Controls.Add(versionLabel, 4, 0);
-            mainLayout.Controls.Add(statusPanel, 0, 4);
+            statusBarPanel.Controls.Add(statusPanel);
+            mainLayout.Controls.Add(statusBarPanel, 0, 4);
 
             this.Controls.Add(mainLayout);
             
@@ -483,11 +686,11 @@ namespace FileserverDriveManager
                 driveLetterBox.Enabled = true;
                 shareNameBox.Enabled = true;
                 addDriveButton.Enabled = true;
-                addDriveButton.BackColor = Color.FromArgb(93, 156, 236);
+                addDriveButton.BackColor = Color.FromArgb(0, 120, 212);  // Modern blue
                 removeDriveButton.Enabled = true;
-                removeDriveButton.BackColor = Color.FromArgb(211, 47, 47);
+                removeDriveButton.BackColor = Color.FromArgb(196, 43, 28);  // Modern red
                 mountDrivesButton.Enabled = true;
-                mountDrivesButton.BackColor = Color.FromArgb(33, 150, 243);
+                mountDrivesButton.BackColor = Color.FromArgb(16, 124, 16);  // Modern green
 
                 statusLabel.Text = $"Ready - {shareNameBox.Items.Count} shares available";
                 SaveCurrentSettings();
