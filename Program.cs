@@ -142,7 +142,6 @@ namespace FileserverDriveManager
                 {
                     if (TestFileserverConnection(username, password))
                     {
-                        isAuthenticated = true;
                         statusLabel.Text = "Auto-authenticated on startup";
                         Log("Auto-authentication successful");
                         
@@ -664,7 +663,6 @@ namespace FileserverDriveManager
                 }
 
                 statusLabel.Text = "Authentication successful - Loading shares...";
-                isAuthenticated = true;
 
                 PopulateAvailableDriveLetters();
                 
