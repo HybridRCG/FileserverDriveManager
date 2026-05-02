@@ -53,11 +53,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     
     - name: Publish self-contained executable
-      run: |
-        dotnet publish -c Release `
-          --self-contained true `
-          -p:PublishSingleFile=true `
-          run: dotnet publish -c Release
+      run: dotnet publish -c Release
     
     - name: Verify executable exists
       run: |
