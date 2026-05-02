@@ -47,7 +47,6 @@ namespace FileserverDriveManager
         private bool isExiting = false;
         private bool isAuthenticating = false;
         private bool autoMountOnStartup = true;
-        private bool isAuthenticated = false;
         private string username = "";
         private string password = "";
         private string fileserverIP = "192.168.1.26";
