@@ -1,4 +1,4 @@
-using System;
+uv4.2sing System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -22,8 +22,7 @@ namespace FileserverDriveManager
 
     public partial class MainForm : Form
     {
-        private const string APP_VERSION = "v4.2";
-        
+        private const string APP_VERSION = "v4.3";        
         private List<DriveMapping> drives = new List<DriveMapping>();
         private TextBox usernameBox;
         private TextBox passwordBox;
