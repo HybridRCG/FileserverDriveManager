@@ -59,6 +59,11 @@ jobs:
     
     - name: Verify executable exists
       run: |
+        Write-Host "=== Listing publish directory contents ==="
+        Get-ChildItem -Path "bin\Release\net8.0-windows\win-x64\publish\" | Format-Table Name, Length -AutoSize
+        Write-Host "=== Total publish dir size ==="
+        $totalSize = (Get-ChildItem -Path "bin\Release\net8.0-windows\win-x64\publish\" -Recurse | Measure-Object -Property Length -Sum).Sum
+        Write-Host "Total size: $([math]::Round($totalSize / 1MB, 2)) MB"
         if (-not (Test-Path "bin\Release\net8.0-windows\win-x64\publish\FileserverDriveManager.exe")) {
           Write-Error "Executable not found!"
           exit 1
