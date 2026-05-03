@@ -1,6 +1,4 @@
-57
-  run: 'dotnet publish -c Release -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true'
-nPublish self-containedame: Build and Release
+name: Build and Release
 
 on:
   push:
@@ -55,7 +53,8 @@ jobs:
       run: dotnet build --configuration Release --no-restore
     
     - name: Publish self-contained executable
-      run: dotnet publish -c Release -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true
+      run: dotnet publish -c Release -p:SelfContained=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+      shell: pwsh
     
     - name: Verify executable exists
       run: |
