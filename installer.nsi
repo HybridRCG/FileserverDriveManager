@@ -13,6 +13,10 @@
   !define SOURCE_EXE "publish\FileserverDriveManager.exe"
 !endif
 
+!ifndef FILE_VERSION
+  !define FILE_VERSION "0.0.0.0"
+!endif
+
 !define APP_NAME       "Fileserver Drive Manager"
 !define APP_PUBLISHER  "Dyna Training"
 !define APP_EXE        "FileserverDriveManager.exe"
@@ -48,7 +52,7 @@ ShowUninstDetails show
 
 !insertmacro MUI_LANGUAGE "English"
 
-VIProductVersion "${VERSION}.0.0"
+VIProductVersion "${FILE_VERSION}"
 VIAddVersionKey "ProductName"     "${APP_NAME}"
 VIAddVersionKey "CompanyName"     "${APP_PUBLISHER}"
 VIAddVersionKey "FileVersion"     "${VERSION}"

@@ -126,8 +126,18 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
+          # NSIS VIProductVersion requires X.X.X.X numeric format.
+          # Strip any non-numeric suffix (e.g. "1.50-test" -> "1.50") and
+          # pad to 4 segments (e.g. "1.50" -> "1.50.0.0").
+          $numericVersion = ($version -replace '[^0-9.].*$','')
+          $parts = $numericVersion.Split('.')
+          while ($parts.Count -lt 4) { $parts += '0' }
+          $fileVersion = ($parts[0..3] -join '.')
+          Write-Host "Display version: $version"
+          Write-Host "File version:    $fileVersion"
           & "C:\Program Files (x86)\NSIS\makensis.exe" `
             "/DVERSION=$version" `
+            "/DFILE_VERSION=$fileVersion" `
             "/DSOURCE_EXE=publish\FileserverDriveManager.exe" `
             installer.nsi
           if ($LASTEXITCODE -ne 0) { throw "NSIS build failed" }
