@@ -100,22 +100,6 @@ jobs:
 
           Write-Host "Verification passed: build is self-contained."
 
-      - name: Embed icon (if icon.ico is present)
-        shell: pwsh
-        run: |
-          if (-not (Test-Path icon.ico)) {
-            Write-Host "icon.ico not found - skipping icon embed"
-            exit 0
-          }
-          Invoke-WebRequest -Uri 'https://www.angusj.com/resourcehacker/resource_hacker.zip' -OutFile rh.zip
-          Expand-Archive -Path rh.zip -DestinationPath ResourceHacker -Force
-          & .\ResourceHacker\ResourceHacker.exe `
-            -open  "publish\FileserverDriveManager.exe" `
-            -save  "publish\FileserverDriveManager.exe" `
-            -action addoverwrite -res icon.ico -mask "ICONGROUP,1,1033"
-          Start-Sleep -Seconds 2
-          Write-Host "Icon embedded."
-
       - name: Install NSIS
         if: hashFiles('installer.nsi') != ''
         run: choco install nsis -y --no-progress
