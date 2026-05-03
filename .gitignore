@@ -37,3 +37,9 @@ archive/
 # Backup/partial files
 Program_ENDING.cs
 Program_*.cs
+publish/
+artifacts/
+Drive Manager V*.exe
+.build-system-backup-*/
+logo.png
+icon.png

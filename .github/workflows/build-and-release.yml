@@ -3,137 +3,164 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # Triggers on version tags like v3.8, v3.9, etc.
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 1.50) - artifact-only build, no release'
+        required: false
+        default: '0.0-test'
 
 permissions:
-  contents: write  # Required to create releases
+  contents: write
 
 jobs:
   build:
     runs-on: windows-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
-    
-    - name: Extract version from Program.cs
-      id: get_version
-      run: |
-        $versionLine = Get-Content "Program.cs" | Select-String 'APP_VERSION = "v.*"' | Select-Object -First 1
-        if ($versionLine -match 'APP_VERSION = "v([0-9.]+)"') {
-          $VERSION = $matches[1]
-          echo "VERSION=$VERSION" >> $env:GITHUB_OUTPUT
-          Write-Host "Detected version: v$VERSION"
-        } else {
-          Write-Error "Could not detect version from Program.cs!"
-          exit 1
-        }
-      shell: pwsh
-    
-    - name: Update installer.nsi with version
-      run: |
-        $VERSION = "${{ steps.get_version.outputs.VERSION }}"
-        $nsiContent = Get-Content "installer.nsi" -Raw
-        $nsiContent = $nsiContent -replace '!define APP_VERSION ".*"', "!define APP_VERSION `"$VERSION`""
-        $nsiContent = $nsiContent -replace 'VIProductVersion ".*"', "VIProductVersion `"$VERSION.0.0`""
-        Set-Content "installer.nsi" -Value $nsiContent -NoNewline
-        Write-Host "installer.nsi updated to version $VERSION"
-      shell: pwsh
-    
-    - name: Restore dependencies
-      run: dotnet restore
-    
-    - name: Publish self-contained executable
-      run: |
-        dotnet publish -c Release --no-restore --force `
-          -p:SelfContained=true `
-          -p:PublishSingleFile=true `
-          -p:IncludeNativeLibrariesForSelfExtract=true
-      shell: pwsh
-    
-    - name: Verify executable exists
-      run: |
-        Write-Host "=== Listing publish directory contents ==="
-        Get-ChildItem -Path "bin\Release\net8.0-windows\win-x64\publish\" | Format-Table Name, Length -AutoSize
-        Write-Host "=== Total publish dir size ==="
-        $totalSize = (Get-ChildItem -Path "bin\Release\net8.0-windows\win-x64\publish\" -Recurse | Measure-Object -Property Length -Sum).Sum
-        Write-Host "Total size: $([math]::Round($totalSize / 1MB, 2)) MB"
-        if (-not (Test-Path "bin\Release\net8.0-windows\win-x64\publish\FileserverDriveManager.exe")) {
-          Write-Error "Executable not found!"
-          exit 1
-        }
-        $fileInfo = Get-Item "bin\Release\net8.0-windows\win-x64\publish\FileserverDriveManager.exe"
-        Write-Host "Executable size: $([math]::Round($fileInfo.Length / 1MB, 2)) MB"
-      shell: pwsh
-    
-    - name: Install NSIS
-      run: choco install nsis -y
-      shell: pwsh
-    
-    - name: Download and setup Resource Hacker
-      run: |
-        Invoke-WebRequest -Uri "http://www.angusj.com/resourcehacker/resource_hacker.zip" -OutFile "rh.zip"
-        Expand-Archive -Path "rh.zip" -DestinationPath "ResourceHacker"
-        Write-Host "Resource Hacker downloaded"
-      shell: pwsh
-    
-    - name: Embed icon into executable
-      run: |
-        .\ResourceHacker\ResourceHacker.exe -open "bin\Release\net8.0-windows\win-x64\publish\FileserverDriveManager.exe" `
-          -save "bin\Release\net8.0-windows\win-x64\publish\FileserverDriveManager.exe" `
-          -action addoverwrite -res icon.ico -mask ICONGROUP,1,1033
-        Start-Sleep -Seconds 3
-      shell: pwsh
-    
-    - name: Build NSIS installer
-      run: |
-        & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
-      shell: pwsh
-    
-    - name: Verify installer created
-      run: |
-        $VERSION = "${{ steps.get_version.outputs.VERSION }}"
-        $installerName = "Drive Manager V$VERSION.exe"
-        if (-not (Test-Path $installerName)) {
-          Write-Error "Installer not found: $installerName"
-          exit 1
-        }
-        $installerInfo = Get-Item $installerName
-        Write-Host "Installer created: $installerName"
-        Write-Host "Size: $([math]::Round($installerInfo.Length / 1MB, 2)) MB"
-      shell: pwsh
-    
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: v${{ steps.get_version.outputs.VERSION }}
-        name: Fileserver Drive Manager v${{ steps.get_version.outputs.VERSION }}
-        body: |
-          ## Fileserver Drive Manager v${{ steps.get_version.outputs.VERSION }}
-          
-          ### 🚀 Installation
-          1. Download **Drive Manager V${{ steps.get_version.outputs.VERSION }}.exe** below
-          2. Run the installer
-          3. Launch from Start Menu or Desktop shortcut
-          
-          ### ✨ Features
-          - Multi-VPN support (Tailscale & NetBird)
-          - Auto-mount network drives on startup
-          - Encrypted password storage
-          - Self-contained executable (no .NET runtime required)
-          
-          ### 📝 Requirements
-          - Windows 10/11 (64-bit)
-          - Tailscale or NetBird VPN (optional)
-        files: |
-          Drive Manager V${{ steps.get_version.outputs.VERSION }}.exe
-        fail_on_unmatched_files: true
-        make_latest: "true"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF -replace 'refs/tags/v',''
+            $isRelease = 'true'
+          } else {
+            $v = '${{ github.event.inputs.version }}'
+            if (-not $v) { $v = '0.0-test' }
+            $isRelease = 'false'
+          }
+          Write-Host "Version: $v"
+          Write-Host "Is release: $isRelease"
+          "version=$v"          | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "is_release=$isRelease" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Clean any cached build artifacts
+        shell: pwsh
+        run: |
+          if (Test-Path bin) { Remove-Item -Recurse -Force bin }
+          if (Test-Path obj) { Remove-Item -Recurse -Force obj }
+          Write-Host "Workspace cleaned."
+
+      - name: Publish self-contained single-file exe
+        shell: pwsh
+        run: |
+          dotnet publish FileserverDriveManager.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output publish `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=embedded
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
+
+      - name: Verify self-contained build
+        shell: pwsh
+        run: |
+          $publishDir = "publish"
+          $files = Get-ChildItem $publishDir -File
+          Write-Host "Files in publish output:"
+          $files | ForEach-Object { Write-Host "  $($_.Name)  ($([math]::Round($_.Length/1MB,2)) MB)" }
+
+          $strayDlls = $files | Where-Object {
+            $_.Extension -eq '.dll' -and
+            ($_.Name -like 'System.*' -or $_.Name -like 'Microsoft.*' -or $_.Name -like 'netstandard.*')
+          }
+          if ($strayDlls.Count -gt 0) {
+            Write-Host "::error::Framework-dependent build detected. Self-contained flags did not take effect."
+            $strayDlls | ForEach-Object { Write-Host "  $($_.Name)" }
+            exit 1
+          }
+
+          $exe = Join-Path $publishDir "FileserverDriveManager.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "::error::Expected exe not produced: $exe"
+            exit 1
+          }
+
+          $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "FileserverDriveManager.exe size: $sizeMb MB"
+
+          if ($sizeMb -lt 40) {
+            Write-Host "::error::Exe is only $sizeMb MB. Self-contained .NET 8 should be 60+ MB. Build is framework-dependent."
+            exit 1
+          }
+
+          Write-Host "Verification passed: build is self-contained."
+
+      - name: Embed icon (if icon.ico is present)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path icon.ico)) {
+            Write-Host "icon.ico not found - skipping icon embed"
+            exit 0
+          }
+          Invoke-WebRequest -Uri 'https://www.angusj.com/resourcehacker/resource_hacker.zip' -OutFile rh.zip
+          Expand-Archive -Path rh.zip -DestinationPath ResourceHacker -Force
+          & .\ResourceHacker\ResourceHacker.exe `
+            -open  "publish\FileserverDriveManager.exe" `
+            -save  "publish\FileserverDriveManager.exe" `
+            -action addoverwrite -res icon.ico -mask "ICONGROUP,1,1033"
+          Start-Sleep -Seconds 2
+          Write-Host "Icon embedded."
+
+      - name: Install NSIS
+        if: hashFiles('installer.nsi') != ''
+        run: choco install nsis -y --no-progress
+        shell: pwsh
+
+      - name: Build NSIS installer
+        if: hashFiles('installer.nsi') != ''
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          & "C:\Program Files (x86)\NSIS\makensis.exe" `
+            "/DVERSION=$version" `
+            "/DSOURCE_EXE=publish\FileserverDriveManager.exe" `
+            installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw "NSIS build failed" }
+
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Copy-Item "publish\FileserverDriveManager.exe" "artifacts\FileserverDriveManager-v$version.exe"
+          $installer = Get-ChildItem "Drive Manager V*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($installer) {
+            Copy-Item $installer.FullName "artifacts\$($installer.Name)"
+          }
+          Get-ChildItem artifacts | ForEach-Object {
+            Write-Host "  $($_.Name)  ($([math]::Round($_.Length/1MB,2)) MB)"
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileserverDriveManager-v${{ steps.version.outputs.version }}
+          path: artifacts/*
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Fileserver Drive Manager v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: artifacts/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

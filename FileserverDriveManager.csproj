@@ -4,18 +4,41 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <Nullable>disable</Nullable>
-    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <AssemblyName>FileserverDriveManager</AssemblyName>
+    <RootNamespace>FileserverDriveManager</RootNamespace>
+    <Version>1.50.0</Version>
+    <FileVersion>1.50.0.0</FileVersion>
+    <AssemblyVersion>1.50.0.0</AssemblyVersion>
+    <Company>Dyna Training</Company>
+    <Product>Fileserver Drive Manager</Product>
+
+    <!-- Single-file publishing settings.
+         SelfContained and RuntimeIdentifier are intentionally NOT here.
+         They are passed on the CLI so the workflow has full control and
+         so IDEs don't auto-publish framework-dependent debug builds. -->
     <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
     <PublishReadyToRun>false</PublishReadyToRun>
     <PublishTrimmed>false</PublishTrimmed>
-    <DebugType>none</DebugType>
-    <DebugSymbols>false</DebugSymbols>
+
+    <ApplicationIcon Condition="Exists('icon.ico')">icon.ico</ApplicationIcon>
+    <NoWarn>$(NoWarn);IL3000</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="logo.png" Condition="Exists('logo.png')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="icon.png" Condition="Exists('icon.png')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
 </Project>
