@@ -337,8 +337,8 @@ namespace FileserverDriveManager
             credStackTable.SetRowSpan(authenticateButton, 2);
             
             // Right: Logo
-            Panel logoPanel = new Panel() { Dock = DockStyle.Fill, BackColor = bgLight, Margin = new Padding(12, 0, 0, 0) };
-            logoPicture = new PictureBox() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = bgLight };
+            Panel logoPanel = new Panel() { Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(12, 0, 0, 0) };
+            logoPicture = new PictureBox() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent };
             
             try
             {
@@ -385,10 +385,10 @@ namespace FileserverDriveManager
             FlowLayoutPanel addFlow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(16, 12, 16, 12), BackColor = bgWhite };
 
             Label driveLetterLabel = new Label() { Text = "Drive Letter:", AutoSize = true, Font = modernFont, Margin = new Padding(0, 8, 8, 0), ForeColor = textPrimary };
-            driveLetterBox = new ComboBox() { Width = 70, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Flat };
+            driveLetterBox = new ComboBox() { Width = 70, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Standard };
             
             Label shareNameLabel = new Label() { Text = "Share Name:", AutoSize = true, Font = modernFont, Margin = new Padding(0, 8, 8, 0), ForeColor = textPrimary };
-            shareNameBox = new ComboBox() { Width = 280, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Flat };
+            shareNameBox = new ComboBox() { Width = 280, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Standard };
             
             addDriveButton = new Button() { 
                 Text = "Add Drive", 
@@ -654,7 +654,10 @@ namespace FileserverDriveManager
             // Update status periodically - but NOT during startup!
             statusTimer = new System.Windows.Forms.Timer();
             statusTimer.Interval = 5000;
-            statusTimer.Tick += (s, e) => UpdateNetworkStatus();
+            statusTimer.Tick += (s, e) => {
+                UpdateNetworkStatus();
+                RefreshStatus();  // Also check drive mount status and update Mount All button
+            };
             // Timer will be started AFTER CheckAndAutoConnect completes
         }
 
@@ -1153,6 +1156,15 @@ namespace FileserverDriveManager
 
             drivesGrid.DataSource = null;
             drivesGrid.DataSource = drives;
+            
+            // Disable "Mount All" button if all drives are already mounted
+            bool allMounted = drives.Count > 0 && drives.All(d => d.Status == "Mounted");
+            bool authenticated = driveLetterBox.Enabled;  // Enabled only after successful auth
+            
+            if (authenticated)
+            {
+                mountDrivesButton.Enabled = !allMounted;
+            }
         }
 
         private void MountAllDrives()
@@ -1330,6 +1342,16 @@ namespace FileserverDriveManager
 
             netbirdIPLabel.Text = netbirdIP.Contains("Not Connected") ? "NetBird: Not Connected" : $"NetBird IP: {netbirdIP}";
             netbirdIPLabel.ForeColor = netbirdIP.Contains("Not Connected") ? Color.Gray : Color.FromArgb(0, 128, 0);
+            
+            // ===== BUTTON STATE LOGIC =====
+            bool tailscaleConnected = !tailscaleIP.Contains("Not Connected");
+            bool netbirdConnected = !netbirdIP.Contains("Not Connected");
+            
+            // Tailscale button: disabled if already connected, OR if NetBird is connected
+            tailscaleButton.Enabled = !tailscaleConnected && !netbirdConnected;
+            
+            // NetBird button: disabled if already connected, OR if Tailscale is connected  
+            netbirdButton.Enabled = !netbirdConnected && !tailscaleConnected;
         }
 
         private string GetNetworkInfo()
