@@ -200,9 +200,9 @@ namespace FileserverDriveManager
             Color successGreen = Color.FromArgb(16, 124, 16);       // Success green
             Color dangerRed = Color.FromArgb(196, 43, 28);          // Danger red
             Color neutralGray = Color.FromArgb(96, 94, 92);         // Neutral gray
-            Color bgLight = Color.FromArgb(243, 242, 241);          // Light background
+            Color bgLight = Color.FromArgb(230, 230, 230);          // Light background (darker for better contrast)
             Color bgWhite = Color.FromArgb(255, 255, 255);          // Pure white
-            Color borderGray = Color.FromArgb(225, 223, 221);       // Border color
+            Color borderGray = Color.FromArgb(200, 200, 200);       // Border color (darker for visibility)
             Color textPrimary = Color.FromArgb(50, 49, 48);         // Primary text
             Color textSecondary = Color.FromArgb(96, 94, 92);       // Secondary text
             
@@ -1189,7 +1189,9 @@ namespace FileserverDriveManager
                         process.Start();
                         process.WaitForExit();
 
-                        if (process.ExitCode == 0)
+                        // Exit code 0 = success, Exit code 2 = already mapped (also success)
+                        // System error 85 (ERROR_ALREADY_ASSIGNED) appears in stderr but drive IS mounted
+                        if (process.ExitCode == 0 || process.ExitCode == 2)
                         {
                             drive.Status = "Mounted";
                             success++;
@@ -1197,9 +1199,21 @@ namespace FileserverDriveManager
                         }
                         else
                         {
-                            drive.Status = "Failed";
-                            failed++;
-                            Log($"Failed to mount {drive.DriveLetter}: {process.StandardError.ReadToEnd()}");
+                            string errorOutput = process.StandardError.ReadToEnd();
+                            
+                            // System error 85 = drive already assigned = actually mounted, not failed
+                            if (errorOutput.Contains("System error 85") || errorOutput.Contains("already"))
+                            {
+                                drive.Status = "Mounted";
+                                success++;
+                                Log($"{drive.DriveLetter} already mounted -> {drive.ShareName}");
+                            }
+                            else
+                            {
+                                drive.Status = "Failed";
+                                failed++;
+                                Log($"Failed to mount {drive.DriveLetter}: {errorOutput}");
+                            }
                         }
                     }
                 }
