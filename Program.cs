@@ -22,7 +22,11 @@ namespace FileserverDriveManager
 
     public partial class MainForm : Form
     {
-        private const string APP_VERSION = "v4.6";        
+        // Version is read from assembly metadata (set in .csproj <Version> tag)
+        // This way release.sh automatically updates it and we never have two places to maintain
+        private static readonly string APP_VERSION = "v" + (System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName().Version?.ToString(3) ?? "0.0.0");
+        
         private List<DriveMapping> drives = new List<DriveMapping>();
         private TextBox usernameBox;
         private TextBox passwordBox;
