@@ -322,6 +322,7 @@ namespace FileserverDriveManager
                 TabStop = true
             };
             authenticateButton.FlatAppearance.BorderSize = 0;
+            authenticateButton.ApplyModernStyle(primaryBlue);
             authenticateButton.Click += AuthenticateButton_Click;
             
             credStackTable.Controls.Add(usernameLabel, 0, 0);
@@ -398,6 +399,7 @@ namespace FileserverDriveManager
                 Enabled = false 
             };
             addDriveButton.FlatAppearance.BorderSize = 0;
+            addDriveButton.ApplyModernStyle(neutralGray);
             addDriveButton.Click += AddDriveButton_Click;
             
             removeDriveButton = new Button() { 
@@ -413,6 +415,7 @@ namespace FileserverDriveManager
                 Enabled = false 
             };
             removeDriveButton.FlatAppearance.BorderSize = 0;
+            removeDriveButton.ApplyModernStyle(neutralGray);
             removeDriveButton.Click += RemoveDriveButton_Click;
 
             addFlow.Controls.Add(driveLetterLabel);
@@ -461,6 +464,14 @@ namespace FileserverDriveManager
             drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Drive", DataPropertyName = "DriveLetter", Width = 100 });
             drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Share Name", DataPropertyName = "ShareName", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
             drivesGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Status", DataPropertyName = "Status", Width = 140 });
+            drivesGrid.AlternatingRowsDefaultCellStyle = new DataGridViewCellStyle() {
+                BackColor = Color.FromArgb(250, 249, 248),
+                ForeColor = textPrimary,
+                SelectionBackColor = Color.FromArgb(0, 120, 212, 40),
+                SelectionForeColor = textPrimary,
+                Padding = new Padding(8, 4, 8, 4)
+            };
+            drivesGrid.EnableHeadersVisualStyles = false;
             gridPanel.Controls.Add(drivesGrid);
             mainLayout.Controls.Add(gridPanel, 0, 2);
 
@@ -481,6 +492,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             mountDrivesButton.FlatAppearance.BorderSize = 0;
+            mountDrivesButton.ApplyModernStyle(neutralGray);
             mountDrivesButton.Click += MountDrivesButton_Click;
             
             settingsButton = new Button() { 
@@ -494,6 +506,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             settingsButton.FlatAppearance.BorderSize = 0;
+            settingsButton.ApplyModernStyle(primaryBlue);
             settingsButton.Click += SettingsButton_Click;
             
             viewLogsButton = new Button() { 
@@ -507,6 +520,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             viewLogsButton.FlatAppearance.BorderColor = borderGray;
+            viewLogsButton.ApplyModernStyle(Color.FromArgb(96, 94, 92));
             viewLogsButton.Click += ViewLogsButton_Click;
             
             tailscaleButton = new Button() { 
@@ -520,6 +534,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             tailscaleButton.FlatAppearance.BorderColor = borderGray;
+            tailscaleButton.ApplyModernStyle(Color.FromArgb(96, 94, 92));
             tailscaleButton.Click += TailscaleButton_Click;
             
             netbirdButton = new Button() { 
@@ -533,6 +548,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             netbirdButton.FlatAppearance.BorderColor = borderGray;
+            netbirdButton.ApplyModernStyle(Color.FromArgb(96, 94, 92));
             netbirdButton.Click += NetBirdButton_Click;
             
             exitButton = new Button() { 
@@ -546,6 +562,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             exitButton.FlatAppearance.BorderSize = 0;
+            exitButton.ApplyModernStyle(dangerRed);
             exitButton.Click += (s, e) => { isExiting = true; this.Close(); };
 
             buttonPanel.Controls.Add(mountDrivesButton, 0, 0);
@@ -1593,6 +1610,84 @@ namespace FileserverDriveManager
         }
     }
 
+    // ========================================================================
+    // ModernButtonExtensions - Adds hover/press/disabled states to buttons
+    // ========================================================================
+    public static class ModernButtonExtensions
+    {
+        public static void ApplyModernStyle(this Button btn, Color baseColor)
+        {
+            Color hoverColor = LightenColor(baseColor, 0.15f);
+            Color pressColor = DarkenColor(baseColor, 0.10f);
+            Color disabledColor = Color.FromArgb(200, 198, 196);
+            Color disabledText = Color.FromArgb(150, 148, 146);
+            
+            btn.FlatStyle = FlatStyle.Flat;
+            btn.FlatAppearance.BorderSize = 0;
+            btn.BackColor = baseColor;
+            btn.ForeColor = Color.White;
+            btn.Cursor = Cursors.Hand;
+            
+            // Hover
+            btn.MouseEnter += (s, e) => {
+                if (btn.Enabled) btn.BackColor = hoverColor;
+            };
+            btn.MouseLeave += (s, e) => {
+                if (btn.Enabled) btn.BackColor = baseColor;
+            };
+            
+            // Press
+            btn.MouseDown += (s, e) => {
+                if (btn.Enabled && e.Button == MouseButtons.Left) btn.BackColor = pressColor;
+            };
+            btn.MouseUp += (s, e) => {
+                if (!btn.Enabled) return;
+                bool stillHovered = btn.ClientRectangle.Contains(btn.PointToClient(Cursor.Position));
+                btn.BackColor = stillHovered ? hoverColor : baseColor;
+            };
+            
+            // Disabled
+            btn.EnabledChanged += (s, e) => {
+                if (btn.Enabled)
+                {
+                    btn.BackColor = baseColor;
+                    btn.ForeColor = Color.White;
+                }
+                else
+                {
+                    btn.BackColor = disabledColor;
+                    btn.ForeColor = disabledText;
+                }
+            };
+            
+            if (!btn.Enabled)
+            {
+                btn.BackColor = disabledColor;
+                btn.ForeColor = disabledText;
+            }
+        }
+        
+        private static Color LightenColor(Color color, float amount)
+        {
+            return Color.FromArgb(
+                color.A,
+                Math.Min(255, (int)(color.R + (255 - color.R) * amount)),
+                Math.Min(255, (int)(color.G + (255 - color.G) * amount)),
+                Math.Min(255, (int)(color.B + (255 - color.B) * amount))
+            );
+        }
+        
+        private static Color DarkenColor(Color color, float amount)
+        {
+            return Color.FromArgb(
+                color.A,
+                Math.Max(0, (int)(color.R * (1 - amount))),
+                Math.Max(0, (int)(color.G * (1 - amount))),
+                Math.Max(0, (int)(color.B * (1 - amount)))
+            );
+        }
+    }
+
     static class Program
     {
         [STAThread]
@@ -1609,7 +1704,7 @@ namespace FileserverDriveManager
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.SetHighDpiMode(HighDpiMode.SystemAware);
+                Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
                 Application.Run(new MainForm());
             }
         }
