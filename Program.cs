@@ -1347,11 +1347,10 @@ namespace FileserverDriveManager
             bool tailscaleConnected = !tailscaleIP.Contains("Not Connected");
             bool netbirdConnected = !netbirdIP.Contains("Not Connected");
             
-            // Tailscale button: disabled if already connected, OR if NetBird is connected
-            tailscaleButton.Enabled = !tailscaleConnected && !netbirdConnected;
-            
-            // NetBird button: disabled if already connected, OR if Tailscale is connected  
-            netbirdButton.Enabled = !netbirdConnected && !tailscaleConnected;
+            // Each VPN button is only disabled if THAT VPN is already connected
+            // Both can run simultaneously on different IP ranges (Tailscale: 100.x, NetBird: 10.x)
+            tailscaleButton.Enabled = !tailscaleConnected;
+            netbirdButton.Enabled = !netbirdConnected;
         }
 
         private string GetNetworkInfo()
