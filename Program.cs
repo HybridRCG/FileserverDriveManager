@@ -59,7 +59,6 @@ namespace FileserverDriveManager
         private string username = "";
         private string password = "";
         private string fileserverIP = "192.168.1.26";
-        private string selectedVPNProvider = "tailscale"; // "tailscale" or "netbird"
         private string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FileserverDriveManager.log");
         private System.Windows.Forms.Timer statusTimer;
 
@@ -132,7 +131,7 @@ namespace FileserverDriveManager
             string vpnIP = GetVPNIP();
             if (string.IsNullOrEmpty(vpnIP) || vpnIP.Contains("Not Connected"))
             {
-                Log($"{selectedVPNProvider} IP not found - VPN may need manual start");
+                Log("VPN IP not found (checked Tailscale and NetBird) - VPN may need manual start");
                 // Don't auto-launch VPN - let user start it manually
                 // This prevents interfering with Windows network initialization
                 // Start network status timer now that startup is complete
@@ -141,7 +140,7 @@ namespace FileserverDriveManager
             }
             else
             {
-                Log($"{selectedVPNProvider} IP already found: {vpnIP}");
+                Log($"VPN IP already found: {vpnIP}");
             }
             
             if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
@@ -785,15 +784,14 @@ namespace FileserverDriveManager
         {
             Form settingsForm = new Form();
             settingsForm.Text = "Settings";
-            settingsForm.Size = new Size(600, 520);
+            settingsForm.Size = new Size(600, 420);
             settingsForm.StartPosition = FormStartPosition.CenterParent;
             settingsForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             settingsForm.MaximizeBox = false;
             settingsForm.MinimizeBox = false;
 
-            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(10) };
+            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(10) };
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 160));
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -853,79 +851,6 @@ namespace FileserverDriveManager
             networkBox.Controls.Add(networkLayout);
             mainLayout.Controls.Add(networkBox, 0, 0);
 
-            // VPN Provider Section
-            GroupBox vpnBox = new GroupBox() { Text = "VPN Provider", Dock = DockStyle.Fill };
-            TableLayoutPanel vpnLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(10) };
-            vpnLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            vpnLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            vpnLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            vpnLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-
-            RadioButton tailscaleRadio = new RadioButton() { Text = "Tailscale", Dock = DockStyle.Fill, Checked = (selectedVPNProvider == "tailscale") };
-            RadioButton netbirdRadio = new RadioButton() { Text = "NetBird", Dock = DockStyle.Fill, Checked = (selectedVPNProvider == "netbird") };
-
-            tailscaleRadio.CheckedChanged += (s, ev) =>
-            {
-                if (tailscaleRadio.Checked)
-                {
-                    selectedVPNProvider = "tailscale";
-                    SaveCurrentSettings();
-                    UpdateNetworkStatus();
-                }
-            };
-
-            netbirdRadio.CheckedChanged += (s, ev) =>
-            {
-                if (netbirdRadio.Checked)
-                {
-                    selectedVPNProvider = "netbird";
-                    SaveCurrentSettings();
-                    UpdateNetworkStatus();
-                }
-            };
-
-            Button installTailscaleButton = new Button() { Text = "Install Tailscale", Dock = DockStyle.Fill, BackColor = Color.FromArgb(93, 156, 236), ForeColor = Color.White, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
-            installTailscaleButton.Click += (s, ev) =>
-            {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "https://tailscale.com/download",
-                        UseShellExecute = true
-                    });
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error opening Tailscale download page: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            };
-
-            Button installNetBirdButton = new Button() { Text = "Install NetBird", Dock = DockStyle.Fill, BackColor = Color.FromArgb(93, 156, 236), ForeColor = Color.White, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
-            installNetBirdButton.Click += (s, ev) =>
-            {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "https://pkgs.netbird.io/windows/x64",
-                        UseShellExecute = true
-                    });
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error opening NetBird download page: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            };
-
-            vpnLayout.Controls.Add(tailscaleRadio, 0, 0);
-            vpnLayout.Controls.Add(installTailscaleButton, 1, 0);
-            vpnLayout.Controls.Add(netbirdRadio, 0, 1);
-            vpnLayout.Controls.Add(installNetBirdButton, 1, 1);
-
-            vpnBox.Controls.Add(vpnLayout);
-            mainLayout.Controls.Add(vpnBox, 0, 1);
-
             // Branding Buttons
             TableLayoutPanel brandingPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(0) };
             brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
@@ -944,7 +869,7 @@ namespace FileserverDriveManager
             brandingPanel.Controls.Add(logoButton, 0, 0);
             brandingPanel.Controls.Add(iconButton, 1, 0);
             brandingPanel.Controls.Add(closeButton, 2, 0);
-            mainLayout.Controls.Add(brandingPanel, 0, 2);
+            mainLayout.Controls.Add(brandingPanel, 0, 1);
 
             // Information Section
             GroupBox infoBox = new GroupBox() { Text = "Information", Dock = DockStyle.Fill };
@@ -959,7 +884,7 @@ namespace FileserverDriveManager
                 ForeColor = Color.Gray
             };
             infoBox.Controls.Add(infoText);
-            mainLayout.Controls.Add(infoBox, 0, 3);
+            mainLayout.Controls.Add(infoBox, 0, 2);
 
             settingsForm.Controls.Add(mainLayout);
             settingsForm.ShowDialog();
@@ -979,25 +904,11 @@ namespace FileserverDriveManager
 
         private void TailscaleButton_Click(object sender, EventArgs e)
         {
-            if (selectedVPNProvider != "tailscale")
-            {
-                if (MessageBox.Show("Tailscale is not the selected VPN provider. Launch anyway?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
-                {
-                    return;
-                }
-            }
             LaunchTailscale();
         }
 
         private void NetBirdButton_Click(object sender, EventArgs e)
         {
-            if (selectedVPNProvider != "netbird")
-            {
-                if (MessageBox.Show("NetBird is not the selected VPN provider. Launch anyway?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.No)
-                {
-                    return;
-                }
-            }
             LaunchNetBird();
         }
 
@@ -1256,27 +1167,23 @@ namespace FileserverDriveManager
 
         private string GetVPNIP()
         {
-            if (selectedVPNProvider == "tailscale")
+            // No manual VPN provider selection anymore - both Tailscale and NetBird
+            // detection are reliable now, so just check both and return whichever
+            // is actually connected. Tailscale checked first (arbitrary, no real
+            // preference between the two); NetBird as fallback.
+            string tsIP = GetTailscaleIP();
+            if (!string.IsNullOrEmpty(tsIP) && !tsIP.Contains("Not Connected"))
             {
-                return GetTailscaleIP();
+                return tsIP;
             }
-            else if (selectedVPNProvider == "netbird")
-            {
-                return GetNetBirdIP();
-            }
-            return "Not Connected";
+            return GetNetBirdIP();
         }
 
         private void LaunchVPN()
         {
-            if (selectedVPNProvider == "tailscale")
-            {
-                LaunchTailscale();
-            }
-            else if (selectedVPNProvider == "netbird")
-            {
-                LaunchNetBird();
-            }
+            // Unused by any caller currently (no provider-selection UI to trigger
+            // it from), kept for potential future use - launches Tailscale first.
+            LaunchTailscale();
         }
 
         private void LaunchTailscale()
@@ -1504,11 +1411,6 @@ namespace FileserverDriveManager
                         }
                     }
 
-                    if (settings.ContainsKey("selectedVPNProvider") && settings["selectedVPNProvider"].ValueKind == System.Text.Json.JsonValueKind.String)
-                    {
-                        selectedVPNProvider = settings["selectedVPNProvider"].GetString();
-                    }
-
                     if (settings.ContainsKey("drives"))
                     {
                         var drivesJson = settings["drives"].GetRawText();
@@ -1537,7 +1439,6 @@ namespace FileserverDriveManager
                     { "password", EncryptPassword(password) },
                     { "fileserverIP", fileserverIP },
                     { "autoMountOnStartup", autoMountOnStartup },
-                    { "selectedVPNProvider", selectedVPNProvider },
                     { "drives", drives }
                 };
 

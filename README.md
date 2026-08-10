@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v5.3
+# Fileserver Drive Manager v5.3.1
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting over Tailscale or NetBird.
 
@@ -6,7 +6,7 @@ A Windows desktop application (.NET 8.0) that maps and manages SMB network drive
 
 ✨ **Dynamic Drive Mapping** - Add/remove any number of drive letter → share name pairs, not a fixed list
 🚀 **Auto-Mount on Startup** - Automatically mounts your saved drives once a VPN connection is detected
-🔀 **Multi-VPN Support** - Works with Tailscale or NetBird (can have both installed; pick which one drives auto-mount detection)
+🔀 **Multi-VPN Support** - Works with Tailscale or NetBird automatically - no manual provider selection needed, the app checks both and uses whichever is connected
 💾 **Persistent Settings** - Saves credentials, drive mappings, and preferences locally
 🔒 **Secure Storage** - Credentials encrypted at rest
 🎯 **Auto-Startup** - Optional launch on Windows startup, minimizes to tray
@@ -28,10 +28,10 @@ Drive letters and share names are fully user-configurable in the app — add as 
 1. Download the latest release `.exe` from [Releases](https://github.com/HybridRCG/FileserverDriveManager/releases)
 2. Run the installer
 3. Launch "Fileserver Drive Manager"
-4. In Settings: set the fileserver IP, choose your VPN provider (Tailscale/NetBird), enter credentials
+4. In Settings: set the fileserver IP, enter credentials (VPN provider is auto-detected - no need to select one)
 5. Use "Test Connection" in Settings to confirm the fileserver is reachable before authenticating
 6. Add your drive letter → share mappings on the main window
-7. Connect your VPN, then "Mount All Drives" (or enable Auto-Mount on Startup in Settings)
+7. Connect Tailscale or NetBird (either one, the app finds whichever is active), then "Mount All Drives" (or enable Auto-Mount on Startup in Settings)
 
 ## Building from Source
 
@@ -62,7 +62,11 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v5.3 (Current)
+### v5.3.1 (Current)
+- Removed the manual VPN Provider selection from Settings - the app now auto-detects Tailscale/NetBird by checking both, instead of requiring you to pick one first
+- Simplified the Tailscale/NetBird launch buttons on the main window (no more "this isn't the selected provider, launch anyway?" prompt)
+
+### v5.3
 - Fixed NetBird VPN IP detection - adapter is named `wt0` with description "WireGuard Tunnel" on Windows (never contains the literal word "netbird"), and its IPv4 range is not the 100.x CGNAT range Tailscale uses
 - Settings "Test Connection" now does a genuine lightweight reachability check (TCP port 445) against whatever IP is currently typed, instead of requiring a hardcoded share and valid credentials to succeed
 - Added local dev workflow support (`Directory.Build.props`, `dev-build-run.bat`) for building/testing off an SMB-mounted share on a separate VM
