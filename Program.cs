@@ -20,6 +20,32 @@ namespace FileserverDriveManager
         public string Status { get; set; }
     }
 
+    // ========================================================================
+    // AppTheme - single source of truth for the v6 color palette.
+    // v6 "cheap tier": one accent color instead of six competing button
+    // colors, semantic status colors, consistent grays. Deliberately kept as
+    // plain color constants (no corner-radius/shape values yet) so a future
+    // "full tier" pass (rounded corners, pill badges, custom-drawn controls)
+    // can extend this same class without another find-and-replace across
+    // every control in the form - just add new constants here and swap the
+    // rendering calls that use them.
+    // ========================================================================
+    public static class AppTheme
+    {
+        public static readonly Color Accent = Color.FromArgb(0, 120, 212);        // Primary actions only (one per view)
+        public static readonly Color Danger = Color.FromArgb(196, 43, 28);        // Destructive actions (Remove, Exit)
+        public static readonly Color SuccessText = Color.FromArgb(16, 124, 16);   // "Mounted" / connected status text
+        public static readonly Color DangerText = Color.FromArgb(196, 43, 28);    // "Failed" status text
+        public static readonly Color MutedText = Color.FromArgb(96, 94, 92);      // "Not Mounted" / not-connected status text
+        public static readonly Color TextPrimary = Color.FromArgb(50, 49, 48);
+        public static readonly Color TextSecondary = Color.FromArgb(96, 94, 92);
+        public static readonly Color BorderGray = Color.FromArgb(200, 200, 200);
+        public static readonly Color BgLight = Color.FromArgb(230, 230, 230);
+        public static readonly Color BgWhite = Color.FromArgb(255, 255, 255);
+        public static readonly Color Disabled = Color.FromArgb(200, 198, 196);
+        public static readonly Color DisabledText = Color.FromArgb(150, 148, 146);
+    }
+
     public partial class MainForm : Form
     {
         // Version is read from assembly metadata (set in .csproj <Version> tag)
@@ -407,7 +433,7 @@ namespace FileserverDriveManager
                 Enabled = false 
             };
             addDriveButton.FlatAppearance.BorderSize = 0;
-            addDriveButton.ApplyModernStyle(neutralGray);
+            addDriveButton.ApplySecondaryStyle(AppTheme.Accent);
             addDriveButton.Click += AddDriveButton_Click;
             
             removeDriveButton = new Button() { 
@@ -423,7 +449,7 @@ namespace FileserverDriveManager
                 Enabled = false 
             };
             removeDriveButton.FlatAppearance.BorderSize = 0;
-            removeDriveButton.ApplyModernStyle(neutralGray);
+            removeDriveButton.ApplySecondaryStyle(AppTheme.Danger);
             removeDriveButton.Click += RemoveDriveButton_Click;
 
             addFlow.Controls.Add(driveLetterLabel);
@@ -480,6 +506,24 @@ namespace FileserverDriveManager
                 Padding = new Padding(8, 4, 8, 4)
             };
             drivesGrid.EnableHeadersVisualStyles = false;
+            // v6 "cheap tier": color-code the Status column text instead of
+            // plain black - green for Mounted, red for Failed/Error, muted
+            // gray otherwise (Not Mounted). Colored text only for now; full
+            // tier can later turn this into an actual pill-shaped badge using
+            // the same AppTheme colors without touching this logic.
+            drivesGrid.CellFormatting += (s, e) =>
+            {
+                if (drivesGrid.Columns[e.ColumnIndex].DataPropertyName != "Status" || e.Value == null)
+                    return;
+                string status = e.Value.ToString();
+                e.CellStyle.ForeColor = status switch
+                {
+                    "Mounted" => AppTheme.SuccessText,
+                    "Failed" or "Error" => AppTheme.DangerText,
+                    _ => AppTheme.MutedText
+                };
+                e.CellStyle.Font = modernFontBold;
+            };
             gridPanel.Controls.Add(drivesGrid);
             mainLayout.Controls.Add(gridPanel, 0, 2);
 
@@ -500,7 +544,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             mountDrivesButton.FlatAppearance.BorderSize = 0;
-            mountDrivesButton.ApplyModernStyle(neutralGray);
+            mountDrivesButton.ApplyModernStyle(AppTheme.Accent);
             mountDrivesButton.Click += MountDrivesButton_Click;
             
             settingsButton = new Button() { 
@@ -513,8 +557,8 @@ namespace FileserverDriveManager
                 Cursor = Cursors.Hand, 
                 FlatStyle = FlatStyle.Flat 
             };
-            settingsButton.FlatAppearance.BorderSize = 0;
-            settingsButton.ApplyModernStyle(primaryBlue);
+            settingsButton.FlatAppearance.BorderSize = 1;
+            settingsButton.ApplySecondaryStyle(AppTheme.Accent);
             settingsButton.Click += SettingsButton_Click;
             
             viewLogsButton = new Button() { 
@@ -528,7 +572,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             viewLogsButton.FlatAppearance.BorderColor = borderGray;
-            viewLogsButton.ApplyModernStyle(Color.FromArgb(96, 94, 92));
+            viewLogsButton.ApplySecondaryStyle(AppTheme.Accent);
             viewLogsButton.Click += ViewLogsButton_Click;
             
             tailscaleButton = new Button() { 
@@ -542,7 +586,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             tailscaleButton.FlatAppearance.BorderColor = borderGray;
-            tailscaleButton.ApplyModernStyle(Color.FromArgb(96, 94, 92));
+            tailscaleButton.ApplySecondaryStyle(AppTheme.Accent);
             tailscaleButton.Click += TailscaleButton_Click;
             
             netbirdButton = new Button() { 
@@ -556,7 +600,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             netbirdButton.FlatAppearance.BorderColor = borderGray;
-            netbirdButton.ApplyModernStyle(Color.FromArgb(96, 94, 92));
+            netbirdButton.ApplySecondaryStyle(AppTheme.Accent);
             netbirdButton.Click += NetBirdButton_Click;
             
             exitButton = new Button() { 
@@ -570,7 +614,7 @@ namespace FileserverDriveManager
                 FlatStyle = FlatStyle.Flat 
             };
             exitButton.FlatAppearance.BorderSize = 0;
-            exitButton.ApplyModernStyle(dangerRed);
+            exitButton.ApplyModernStyle(AppTheme.Danger);
             exitButton.Click += (s, e) => { isExiting = true; this.Close(); };
 
             buttonPanel.Controls.Add(mountDrivesButton, 0, 0);
@@ -709,12 +753,14 @@ namespace FileserverDriveManager
 
                 driveLetterBox.Enabled = true;
                 shareNameBox.Enabled = true;
+                // Just toggle Enabled - ApplySecondaryStyle/ApplyModernStyle's own
+                // EnabledChanged handlers restore the correct color automatically.
+                // (Previously this manually overwrote BackColor here, which desynced
+                // from the hover/press color closures captured back when the style
+                // was first applied, causing wrong colors on hover after unlocking.)
                 addDriveButton.Enabled = true;
-                addDriveButton.BackColor = Color.FromArgb(0, 120, 212);  // Modern blue
                 removeDriveButton.Enabled = true;
-                removeDriveButton.BackColor = Color.FromArgb(196, 43, 28);  // Modern red
                 mountDrivesButton.Enabled = true;
-                mountDrivesButton.BackColor = Color.FromArgb(16, 124, 16);  // Modern green
 
                 statusLabel.Text = $"Ready - {shareNameBox.Items.Count} shares available";
                 SaveCurrentSettings();
@@ -809,7 +855,9 @@ namespace FileserverDriveManager
             networkLayout.Controls.Add(ipLabel, 0, 0);
             networkLayout.Controls.Add(ipBox, 1, 0);
 
-            Button testButton = new Button() { Text = "Test Connection", Dock = DockStyle.Fill, BackColor = Color.FromArgb(33, 150, 243), ForeColor = Color.White, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            Button testButton = new Button() { Text = "Test Connection", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            testButton.FlatAppearance.BorderSize = 1;
+            testButton.ApplySecondaryStyle(AppTheme.Accent);
             testButton.Click += (s, ev) =>
             {
                 // Tests reachability of whatever IP is currently typed in the box
@@ -828,7 +876,9 @@ namespace FileserverDriveManager
                 }
             };
 
-            Button saveIPButton = new Button() { Text = "Save IP", Dock = DockStyle.Fill, BackColor = Color.FromArgb(76, 175, 80), ForeColor = Color.White, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            Button saveIPButton = new Button() { Text = "Save IP", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            saveIPButton.FlatAppearance.BorderSize = 0;
+            saveIPButton.ApplyModernStyle(AppTheme.Accent);
             saveIPButton.Click += (s, ev) =>
             {
                 fileserverIP = ipBox.Text.Trim();
@@ -857,13 +907,19 @@ namespace FileserverDriveManager
             brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
             brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
 
-            Button logoButton = new Button() { Text = "Change Logo", BackColor = Color.FromArgb(156, 39, 176), ForeColor = Color.White, Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
+            Button logoButton = new Button() { Text = "Change Logo", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
+            logoButton.FlatAppearance.BorderSize = 1;
+            logoButton.ApplySecondaryStyle(AppTheme.Accent);
             logoButton.Click += LogoPicture_Click;
 
-            Button iconButton = new Button() { Text = "Change Icon", BackColor = Color.FromArgb(233, 30, 99), ForeColor = Color.White, Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
+            Button iconButton = new Button() { Text = "Change Icon", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
+            iconButton.FlatAppearance.BorderSize = 1;
+            iconButton.ApplySecondaryStyle(AppTheme.Accent);
             iconButton.Click += FaviconButton_Click;
 
-            Button closeButton = new Button() { Text = "Close", BackColor = Color.FromArgb(150, 150, 150), ForeColor = Color.White, Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0) };
+            Button closeButton = new Button() { Text = "Close", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0) };
+            closeButton.FlatAppearance.BorderSize = 1;
+            closeButton.ApplySecondaryStyle(AppTheme.TextSecondary);
             closeButton.Click += (s, ev) => settingsForm.Close();
 
             brandingPanel.Controls.Add(logoButton, 0, 0);
@@ -1253,13 +1309,13 @@ namespace FileserverDriveManager
             string netbirdIP = GetNetBirdIP();
 
             lanIPLabel.Text = string.IsNullOrEmpty(lanIP) ? "Network: Not Connected" : $"Network: {lanIP}";
-            lanIPLabel.ForeColor = string.IsNullOrEmpty(lanIP) ? Color.Gray : Color.Black;
+            lanIPLabel.ForeColor = string.IsNullOrEmpty(lanIP) ? AppTheme.MutedText : AppTheme.TextPrimary;
 
             tailscaleIPLabel.Text = tailscaleIP.Contains("Not Connected") ? "Tailscale: Not Connected" : $"Tailscale IP: {tailscaleIP}";
-            tailscaleIPLabel.ForeColor = tailscaleIP.Contains("Not Connected") ? Color.Gray : Color.FromArgb(0, 128, 0);
+            tailscaleIPLabel.ForeColor = tailscaleIP.Contains("Not Connected") ? AppTheme.MutedText : AppTheme.SuccessText;
 
             netbirdIPLabel.Text = netbirdIP.Contains("Not Connected") ? "NetBird: Not Connected" : $"NetBird IP: {netbirdIP}";
-            netbirdIPLabel.ForeColor = netbirdIP.Contains("Not Connected") ? Color.Gray : Color.FromArgb(0, 128, 0);
+            netbirdIPLabel.ForeColor = netbirdIP.Contains("Not Connected") ? AppTheme.MutedText : AppTheme.SuccessText;
             
             // ===== BUTTON STATE LOGIC =====
             bool tailscaleConnected = !tailscaleIP.Contains("Not Connected");
@@ -1658,6 +1714,54 @@ namespace FileserverDriveManager
             {
                 btn.BackColor = disabledColor;
                 btn.ForeColor = disabledText;
+            }
+        }
+
+        // v6 "cheap tier": outline/ghost style for de-emphasized buttons -
+        // white background, colored border+text, no fill. Used for anything
+        // that isn't the single primary action of its screen (View Logs,
+        // Tailscale/NetBird launch, Change Logo/Icon, Close, Test Connection,
+        // Add Drive). Keeps AppTheme.Accent as the only filled/attention-
+        // grabbing color per view instead of six competing solid colors.
+        public static void ApplySecondaryStyle(this Button btn, Color accentColor)
+        {
+            Color hoverBg = LightenColor(accentColor, 0.92f);
+            Color disabledBorder = Color.FromArgb(200, 198, 196);
+            Color disabledText = Color.FromArgb(150, 148, 146);
+
+            btn.FlatStyle = FlatStyle.Flat;
+            btn.FlatAppearance.BorderSize = 1;
+            btn.FlatAppearance.BorderColor = accentColor;
+            btn.BackColor = Color.White;
+            btn.ForeColor = accentColor;
+            btn.Cursor = Cursors.Hand;
+
+            btn.MouseEnter += (s, e) => {
+                if (btn.Enabled) btn.BackColor = hoverBg;
+            };
+            btn.MouseLeave += (s, e) => {
+                if (btn.Enabled) btn.BackColor = Color.White;
+            };
+
+            btn.EnabledChanged += (s, e) => {
+                if (btn.Enabled)
+                {
+                    btn.BackColor = Color.White;
+                    btn.ForeColor = accentColor;
+                    btn.FlatAppearance.BorderColor = accentColor;
+                }
+                else
+                {
+                    btn.BackColor = Color.White;
+                    btn.ForeColor = disabledText;
+                    btn.FlatAppearance.BorderColor = disabledBorder;
+                }
+            };
+
+            if (!btn.Enabled)
+            {
+                btn.ForeColor = disabledText;
+                btn.FlatAppearance.BorderColor = disabledBorder;
             }
         }
         
