@@ -25,9 +25,24 @@ fi
 
 CSPROJ="FileserverDriveManager.csproj"
 if [[ -f "$CSPROJ" ]]; then
-  sed -i '' -E "s|<Version>[^<]+</Version>|<Version>${VERSION}.0</Version>|" "$CSPROJ"
-  sed -i '' -E "s|<FileVersion>[^<]+</FileVersion>|<FileVersion>${VERSION}.0.0</FileVersion>|" "$CSPROJ"
-  sed -i '' -E "s|<AssemblyVersion>[^<]+</AssemblyVersion>|<AssemblyVersion>${VERSION}.0.0</AssemblyVersion>|" "$CSPROJ"
+  # Normalize VERSION (2-part "X.Y" or 3-part "X.Y.Z" input) into:
+  #   <Version>       - always 3-part (X.Y.Z), what NuGet/the app displays
+  #   <FileVersion> / <AssemblyVersion> - always 4-part (X.Y.Z.0), the .NET-required format
+  # Previously this blindly appended ".0" and ".0.0" regardless of how many
+  # parts VERSION already had, which produced an invalid 5-part string
+  # (e.g. "5.3.1.0.0") whenever a 3-part version was passed - .NET's SDK
+  # rejects anything beyond 4 parts with CS7034.
+  IFS='.' read -ra VPARTS <<< "$VERSION"
+  case "${#VPARTS[@]}" in
+    2) FULL_VERSION="${VERSION}.0" ;;
+    3) FULL_VERSION="${VERSION}" ;;
+    *) echo "Unexpected version part count for '$VERSION'"; exit 1 ;;
+  esac
+  FILE_VERSION="${FULL_VERSION}.0"
+
+  sed -i '' -E "s|<Version>[^<]+</Version>|<Version>${FULL_VERSION}</Version>|" "$CSPROJ"
+  sed -i '' -E "s|<FileVersion>[^<]+</FileVersion>|<FileVersion>${FILE_VERSION}</FileVersion>|" "$CSPROJ"
+  sed -i '' -E "s|<AssemblyVersion>[^<]+</AssemblyVersion>|<AssemblyVersion>${FILE_VERSION}</AssemblyVersion>|" "$CSPROJ"
   git add "$CSPROJ"
 fi
 
