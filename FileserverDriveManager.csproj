@@ -10,9 +10,9 @@
 
     <AssemblyName>FileserverDriveManager</AssemblyName>
     <RootNamespace>FileserverDriveManager</RootNamespace>
-    <Version>5.2.0</Version>
-    <FileVersion>5.2.0.0</FileVersion>
-    <AssemblyVersion>5.2.0.0</AssemblyVersion>
+    <Version>5.3.0</Version>
+    <FileVersion>5.3.0.0</FileVersion>
+    <AssemblyVersion>5.3.0.0</AssemblyVersion>
     <Company>Dyna Training</Company>
     <Product>Fileserver Drive Manager</Product>
 
@@ -31,6 +31,25 @@
     <ApplicationIcon Condition="Exists('icon.ico')">icon.ico</ApplicationIcon>
     <NoWarn>$(NoWarn);IL3000</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Explicit include: MSBuild's default **/*.cs glob was silently missing
+         Program.cs when building against the SMB-mounted Y:\ share (Mac -> VM
+         dev loop) - likely a directory-enumeration quirk over the network
+         mount, not an exclusion rule. Explicit Include guarantees it's always
+         compiled regardless of glob timing. -->
+    <Compile Remove="Program.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- archive/ holds old dated backups of Program.cs (see archive-before-build.sh).
+         It's gitignored, so a fresh CI checkout never sees it - but on a local
+         working copy every backup .cs file in there was being compiled alongside
+         the real Program.cs, causing duplicate class / entry-point errors. -->
+    <Compile Remove="archive/**/*.cs" />
+    <Compile Remove="Program_*.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="logo.png" Condition="Exists('logo.png')">

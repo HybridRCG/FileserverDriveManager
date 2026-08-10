@@ -1,0 +1,12 @@
+<Project>
+  <!-- Imported by MSBuild BEFORE the .csproj body and before NuGet decides
+       where to write obj/*.tmp restore files. Setting BaseIntermediateOutputPath
+       here (not inside the .csproj) is required for it to actually take effect
+       on NuGet restore over an SMB share, where atomic temp-file renames fail.
+       Falls back to normal in-project obj/bin when C:\build doesn't exist
+       (e.g. on GitHub Actions runners, or your Mac). -->
+  <PropertyGroup Condition="Exists('C:\build\')">
+    <BaseIntermediateOutputPath>C:\build\FileserverDriveManager\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>C:\build\FileserverDriveManager\bin\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

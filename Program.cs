@@ -25,7 +25,12 @@ namespace FileserverDriveManager
         // Version is read from assembly metadata (set in .csproj <Version> tag)
         // This way release.sh automatically updates it and we never have two places to maintain
         private static readonly string APP_VERSION = "v" + (System.Reflection.Assembly.GetExecutingAssembly()
-            .GetName().Version?.ToString(3) ?? "0.0.0");
+            .GetName().Version?.ToString(3) ?? "0.0.0")
+#if DEBUG
+            + "-dev";
+#else
+            ;
+#endif
         
         private List<DriveMapping> drives = new List<DriveMapping>();
         private TextBox usernameBox;
@@ -809,13 +814,19 @@ namespace FileserverDriveManager
             Button testButton = new Button() { Text = "Test Connection", Dock = DockStyle.Fill, BackColor = Color.FromArgb(33, 150, 243), ForeColor = Color.White, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
             testButton.Click += (s, ev) =>
             {
-                if (TestFileserverConnection(username, password))
+                // Tests reachability of whatever IP is currently typed in the box
+                // (not necessarily the saved fileserverIP), and doesn't require
+                // valid credentials or a specific share to exist - just "can this
+                // host be reached on the SMB port". Real credential/share testing
+                // still happens on Authenticate.
+                string ipToTest = ipBox.Text.Trim();
+                if (TestFileserverReachability(ipToTest))
                 {
-                    MessageBox.Show("Connection successful!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show($"Reached {ipToTest} (SMB port 445 open).", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show("Connection failed!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show($"Could not reach {ipToTest} on port 445. Check IP, network/VPN connectivity, or that SMB is enabled on that host.", "Connection Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             };
 
@@ -1387,7 +1398,11 @@ namespace FileserverDriveManager
             {
                 foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
                 {
-                    if (ni.Name.ToLower().Contains("tailscale") && ni.OperationalStatus == OperationalStatus.Up)
+                    // Check both Name and Description: Tailscale's WinTun adapter often gets
+                    // a generic OS-assigned Name (e.g. "Ethernet 5") while the identifying
+                    // "Tailscale" text is actually in Description, not Name.
+                    if ((ni.Name.ToLower().Contains("tailscale") || ni.Description.ToLower().Contains("tailscale"))
+                        && ni.OperationalStatus == OperationalStatus.Up)
                     {
                         foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
                         {
@@ -1413,17 +1428,33 @@ namespace FileserverDriveManager
             {
                 foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
                 {
-                    if (ni.Name.ToLower().Contains("netbird") && ni.OperationalStatus == OperationalStatus.Up)
+                    // NetBird's Windows adapter never contains the literal word "netbird" -
+                    // it shows up as Name="wt0", Description="WireGuard Tunnel". Match on
+                    // those specifically (plus a literal "netbird" check as a fallback for
+                    // future client versions that might name it differently).
+                    string niNameLower = ni.Name.ToLower();
+                    string niDescLower = ni.Description.ToLower();
+                    bool looksLikeNetBird = niNameLower.Contains("netbird")
+                        || niDescLower.Contains("netbird")
+                        || niNameLower == "wt0"
+                        || niDescLower.Contains("wireguard tunnel");
+                    // Not gating on OperationalStatus == Up here: WinTun-based virtual
+                    // adapters (which NetBird uses) are known to sometimes report
+                    // OperationalStatus as Unknown via .NET's API even when actually
+                    // functional and shown as "Up" in Get-NetAdapter/Windows itself.
+                    // A valid 100.x address is sufficient proof of a working connection.
+                    if (looksLikeNetBird)
                     {
                         foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
                         {
                             if (ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                             {
-                                string ipStr = ip.Address.ToString();
-                                if (ipStr.StartsWith("100."))
-                                {
-                                    return ipStr;
-                                }
+                                // Unlike Tailscale (fixed 100.x CGNAT range), NetBird's IPv4
+                                // range is configurable per-network and was observed issuing
+                                // 10.64.x.x here, not 100.x. Since this adapter is already
+                                // confirmed to be NetBird by name/description above, any
+                                // valid IPv4 on it is correct - no range filter needed.
+                                return ip.Address.ToString();
                             }
                         }
                     }
@@ -1518,6 +1549,29 @@ namespace FileserverDriveManager
             catch (Exception ex)
             {
                 Log("Error saving settings: " + ex.Message);
+            }
+        }
+
+        private bool TestFileserverReachability(string ip)
+        {
+            // Pure reachability check: attempts a raw TCP connect to the SMB port
+            // (445). No credentials, no share name, no mounting - just "is this
+            // host up and listening for SMB on the network/VPN path right now".
+            // Distinct from TestFileserverConnection(), which actually
+            // authenticates and mounts a real share (used by Authenticate).
+            try
+            {
+                using (var client = new System.Net.Sockets.TcpClient())
+                {
+                    var connectTask = client.ConnectAsync(ip, 445);
+                    bool completedInTime = connectTask.Wait(3000);
+                    return completedInTime && client.Connected;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Reachability test error for {ip}: {ex.Message}");
+                return false;
             }
         }
 
