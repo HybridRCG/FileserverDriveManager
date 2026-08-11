@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.4
+# Fileserver Drive Manager v7.5.5
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -65,7 +65,11 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.4 (Current)
+### v7.5.5 (Current)
+- Fixed the window flashing visibly for the full 10-second startup delay before hiding to tray - it now hides immediately on launch instead of waiting until after the delay, so the app starts tray-only from the first instant like a proper background utility
+- Fixed a related bug where manually clicking "Show" from the tray during that startup delay would get silently undone the moment the delay finished, since the old hide-to-tray code ran unconditionally afterward
+
+### v7.5.4
 - Fixed the Tailscale IP/NetBird IP/Network status labels staying blank for a long time on startup - `UpdateNetworkStatus()` was only ever wired to the 5-second status timer, which didn't start until the entire race+authenticate+mount sequence finished. If mounting took a while, the labels sat empty that whole time even though the actual connection succeeded quickly. The timer (and an immediate first status update) now starts right after the initial 10s startup delay, independent of how long the rest of the sequence takes.
 
 ### v7.5.3

@@ -190,6 +190,17 @@ namespace FileserverDriveManager
             // Auto-enable startup on first run
             this.Load += async (s, e) => 
             {
+                // v7.5.5: previously the window stayed visible for the full
+                // 10s startup delay (inside CheckAndAutoConnect) before
+                // hiding to tray - a visible "flash then vanish" on every
+                // launch, which is confusing and made the window briefly
+                // interactive before yanking it away. Hiding immediately on
+                // Load means the app starts tray-only from the first instant,
+                // matching how a background auto-mount utility should behave.
+                this.WindowState = FormWindowState.Minimized;
+                this.ShowInTaskbar = false;
+                notifyIcon.Visible = true;
+
                 EnableAutoStartup();
                 await CheckAndAutoConnect();
             };
@@ -237,10 +248,15 @@ namespace FileserverDriveManager
             // icon - not a true hang, but indistinguishable from one to the
             // user. Task.Delay yields the thread instead of blocking it.
             await Task.Delay(10000);
-            
-            this.WindowState = FormWindowState.Minimized;
-            this.ShowInTaskbar = false;
-            notifyIcon.Visible = true;
+
+            // v7.5.5: hiding to tray now happens immediately on Load (see
+            // constructor) instead of here. Removed the duplicate
+            // WindowState/ShowInTaskbar/notifyIcon lines that used to be
+            // here - besides being redundant, they had a real bug: if the
+            // user manually clicked "Show" from the tray during this 10s
+            // delay, this code would have forced the window back into
+            // hiding again the moment the delay finished, undoing their
+            // action.
 
             // v7.5.4: UpdateNetworkStatus() (which populates the Tailscale
             // IP/NetBird IP/Network labels) was only ever wired to the 5s
