@@ -230,8 +230,13 @@ namespace FileserverDriveManager
 
         private async Task CheckAndAutoConnect()
         {
-            // Wait 10 seconds for Windows network to fully initialize
-            System.Threading.Thread.Sleep(10000);
+            // v7.5.2: was Thread.Sleep(10000) - a synchronous block directly on
+            // the UI thread. That starves the Windows message pump for the
+            // full 10 seconds on every launch, which is exactly what makes an
+            // app show "Not Responding" and ignore right-clicks on its tray
+            // icon - not a true hang, but indistinguishable from one to the
+            // user. Task.Delay yields the thread instead of blocking it.
+            await Task.Delay(10000);
             
             this.WindowState = FormWindowState.Minimized;
             this.ShowInTaskbar = false;
@@ -284,15 +289,15 @@ namespace FileserverDriveManager
                     fileserverIP = fastest.IP;
                     Log($"Auto-connect using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
 
-                    if (TestFileserverConnection(username, password))
+                    if (await TestFileserverConnection(username, password))
                     {
                         statusLabel.Text = "Auto-authenticated on startup";
                         Log("Auto-authentication successful");
                         
                         Log("Auto-mounting drives on startup...");
-                        MountAllDrives();
+                        await MountAllDrives();
                         
-                        System.Threading.Thread.Sleep(3000);
+                        await Task.Delay(3000);
                         
                         Log("All drives mounted - staying minimized in tray");
                         // Start network status timer now that startup is complete
@@ -872,7 +877,7 @@ namespace FileserverDriveManager
 
             try
             {
-                if (!TestFileserverConnection(username, password))
+                if (!await TestFileserverConnection(username, password))
                 {
                     statusLabel.Text = "Authentication failed";
                     authenticateButton.Enabled = true;
@@ -995,9 +1000,9 @@ namespace FileserverDriveManager
             statusLabel.Text = $"Removed {drive.DriveLetter}";
         }
 
-        private void MountDrivesButton_Click(object sender, EventArgs e)
+        private async void MountDrivesButton_Click(object sender, EventArgs e)
         {
-            MountAllDrives();
+            await MountAllDrives();
         }
 
         private void SettingsButton_Click(object sender, EventArgs e)
@@ -1445,7 +1450,7 @@ namespace FileserverDriveManager
 
                 UnmountAllDrivesQuiet();
                 fileserverIP = fastest.IP;
-                MountAllDrives();
+                await MountAllDrives();
 
                 int mountedCount = drives.Count(d => d.Status == "Mounted");
                 statusLabel.Text = $"Failed over to {fastest.Label} - {mountedCount} drives mounted";
@@ -1457,7 +1462,7 @@ namespace FileserverDriveManager
             }
         }
 
-        private void MountAllDrives()
+        private async Task MountAllDrives()
         {
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
@@ -1489,16 +1494,18 @@ namespace FileserverDriveManager
                     {
                         process.StartInfo = psi;
                         process.Start();
-                        // v7.5.1: this previously had NO timeout at all. If
-                        // `net use` itself hangs - which can happen over an
-                        // unusual network path (e.g. NetBird/Tailscale exit-
-                        // node routing quirks) even when our lightweight
-                        // port-445 race check succeeded - this blocked the UI
-                        // thread indefinitely, since MountAllDrives runs
-                        // synchronously on the UI thread during startup
-                        // auto-connect. A hung net.exe would freeze the whole
-                        // app, including the tray icon context menu.
-                        bool exited = process.WaitForExit(15000);
+                        // v7.5.2: was the synchronous WaitForExit(15000). Still
+                        // bounded (v7.5.1 fix), but a synchronous 15s block on
+                        // the UI thread still makes the app look/act frozen
+                        // (ignores right-clicks, shows "Not Responding") for
+                        // that whole window if net use is slow. WaitForExitAsync
+                        // yields the thread instead of blocking it.
+                        bool exited = true;
+                        using (var cts = new System.Threading.CancellationTokenSource(15000))
+                        {
+                            try { await process.WaitForExitAsync(cts.Token); }
+                            catch (OperationCanceledException) { exited = false; }
+                        }
                         if (!exited)
                         {
                             try { process.Kill(); } catch { }
@@ -1665,6 +1672,23 @@ namespace FileserverDriveManager
                     if (ni.OperationalStatus == OperationalStatus.Up && 
                         ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
                     {
+                        // v7.5.3: this used to only exclude Tailscale's 100.x
+                        // CGNAT range via IP prefix - but NetBird's range is
+                        // configurable per network (we've seen 10.64.x.x here),
+                        // so on a machine with no physical LAN, NetBird's own
+                        // tunnel adapter was getting picked up and mislabeled
+                        // as "(Ethernet)"/"(WiFi)" LAN. Explicitly exclude
+                        // known VPN adapters by name/description instead of
+                        // guessing from the IP range, matching the same checks
+                        // GetTailscaleIP()/GetNetBirdIP() already use.
+                        string niName = ni.Name.ToLower();
+                        string niDesc = ni.Description.ToLower();
+                        bool isKnownVpnAdapter = niName.Contains("tailscale") || niDesc.Contains("tailscale")
+                            || niName.Contains("netbird") || niDesc.Contains("netbird")
+                            || niName == "wt0" || niDesc.Contains("wireguard tunnel")
+                            || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel;
+                        if (isKnownVpnAdapter) continue;
+
                         foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
                         {
                             if (ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
@@ -1921,11 +1945,66 @@ namespace FileserverDriveManager
             });
 
             var results = (await Task.WhenAll(tasks)).ToList();
+
+            // v7.5.3: a successful "LAN" result doesn't necessarily mean a
+            // real physical LAN link - if a VPN advertises an exit-node route
+            // for that subnet, the exact same TCP connect succeeds via the
+            // tunnel instead. A raw reachability check can't tell those apart
+            // on its own, so cross-check: if the client's own local adapters
+            // aren't actually on that subnet, this "LAN" success is being
+            // routed through VPN, and the label should say so rather than
+            // implying a direct connection that isn't really there.
+            for (int i = 0; i < results.Count; i++)
+            {
+                if (results[i].Label == "LAN" && results[i].success && !IsClientOnSameLanSubnet(results[i].IP))
+                {
+                    results[i] = ("LAN (via VPN route)", results[i].IP, results[i].ElapsedMilliseconds, results[i].success);
+                }
+            }
+
             // Successful candidates first (fastest first), unreachable ones after
             results = results.OrderBy(r => r.success ? 0 : 1).ThenBy(r => r.ElapsedMilliseconds).ToList();
             foreach (var r in results)
                 Log($"[FileserverRace] {r.Label} ({r.IP}): {(r.success ? $"{r.ElapsedMilliseconds}ms" : "unreachable")}");
             return results;
+        }
+
+        // v7.5.3: heuristic /24 subnet check - true if any of the client's own
+        // non-loopback, non-VPN adapters has an IPv4 address sharing the same
+        // first three octets as targetIp. Used to distinguish a genuine LAN
+        // connection from a VPN-tunneled route reaching the same subnet.
+        private bool IsClientOnSameLanSubnet(string targetIp)
+        {
+            try
+            {
+                var targetParts = targetIp.Split('.');
+                if (targetParts.Length != 4) return false;
+                string targetPrefix = $"{targetParts[0]}.{targetParts[1]}.{targetParts[2]}.";
+
+                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                        continue;
+                    string niName = ni.Name.ToLower();
+                    string niDesc = ni.Description.ToLower();
+                    bool isKnownVpnAdapter = niName.Contains("tailscale") || niDesc.Contains("tailscale")
+                        || niName.Contains("netbird") || niDesc.Contains("netbird")
+                        || niName == "wt0" || niDesc.Contains("wireguard tunnel")
+                        || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel;
+                    if (isKnownVpnAdapter) continue;
+
+                    foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+                    {
+                        if (ip.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+                            && ip.Address.ToString().StartsWith(targetPrefix))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
         }
 
         private bool TestFileserverReachability(string ip)
@@ -1951,7 +2030,7 @@ namespace FileserverDriveManager
             }
         }
 
-        private bool TestFileserverConnection(string testUsername, string testPassword)
+        private async Task<bool> TestFileserverConnection(string testUsername, string testPassword)
         {
             try
             {
@@ -1970,20 +2049,36 @@ namespace FileserverDriveManager
                 {
                     process.StartInfo = psi;
                     process.Start();
-                    process.WaitForExit(5000);
+                    // v7.5.2: was the synchronous WaitForExit(5000), which blocks
+                    // the UI thread for up to 5s even though it's bounded.
+                    // WaitForExitAsync yields instead of blocking, keeping the
+                    // app responsive (tray icon, right-click) throughout.
+                    using (var cts = new System.Threading.CancellationTokenSource(5000))
+                    {
+                        try { await process.WaitForExitAsync(cts.Token); }
+                        catch (OperationCanceledException) { try { process.Kill(); } catch { } }
+                    }
 
                     bool success = process.ExitCode == 0;
 
                     // Clean up the test connection
                     if (success)
                     {
-                        Process.Start(new ProcessStartInfo
+                        var cleanupProcess = Process.Start(new ProcessStartInfo
                         {
                             FileName = "net",
                             Arguments = $"use \\\\{fileserverIP}\\General /delete",
                             UseShellExecute = false,
                             CreateNoWindow = true
-                        })?.WaitForExit(2000);
+                        });
+                        if (cleanupProcess != null)
+                        {
+                            using (var cts2 = new System.Threading.CancellationTokenSource(2000))
+                            {
+                                try { await cleanupProcess.WaitForExitAsync(cts2.Token); }
+                                catch (OperationCanceledException) { try { cleanupProcess.Kill(); } catch { } }
+                            }
+                        }
                     }
 
                     return success;

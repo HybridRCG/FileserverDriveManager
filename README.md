@@ -1,11 +1,11 @@
-# Fileserver Drive Manager v7.5.1
+# Fileserver Drive Manager v7.5.3
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
 ## Features
 
 ✨ **Dynamic Drive Mapping** - Add/remove any number of drive letter → share name pairs, not a fixed list, each with its own per-row unmount/remove button
-🏁 **Multi-Path Racing** - Configure LAN, Tailscale, and NetBird IPs for the fileserver; Authenticate races all three concurrently and uses whichever responds fastest
+🏁 **Multi-Path Racing** - Configure any combination of LAN, Tailscale, and NetBird IPs for the fileserver (leave any blank if not applicable, e.g. VPN-only machines with no LAN); Authenticate races all configured paths concurrently and uses whichever responds fastest
 🚀 **Auto-Mount on Startup** - Automatically races and mounts your saved drives once any VPN connection is detected
 🔀 **Multi-VPN Support** - Works with Tailscale or NetBird automatically - no manual provider selection needed, the app checks both and uses whichever is connected
 🌓 **Dark Mode** - Full dark/light theme toggle in Settings (applies on next launch)
@@ -65,7 +65,14 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.1 (Current)
+### v7.5.3 (Current)
+- Fixed the "Network:" status label picking up a VPN tunnel adapter's IP and mislabeling it as a physical LAN connection - it only excluded Tailscale's 100.x range before, never NetBird's (whose range varies per network), so on a machine with no physical LAN, NetBird's own address showed up as "(Ethernet)"
+- The fileserver race now shows **"LAN (via VPN route)"** instead of plain "LAN" when a configured LAN IP is only reachable because a VPN is advertising an exit-node route for that subnet, rather than a genuine direct connection - a raw TCP check can't tell the difference on its own, so this cross-checks against the client's own detected local subnet
+
+### v7.5.2
+- Converted every remaining blocking call in the startup/mount/authenticate path to genuinely async (`Process.WaitForExitAsync`, `Task.Delay` instead of `Thread.Sleep`) - even with v7.5.1's bounded timeouts, a synchronous block on the UI thread for several seconds still made the app appear frozen (ignoring right-clicks, showing "Not Responding") during that window. Startup, Authenticate, Mount All, and failover now all properly yield the UI thread instead of blocking it.
+
+### v7.5.1
 - Fixed a real UI-freeze bug: `MountAllDrives()` had one `Process.WaitForExit()` call with no timeout at all. If `net use` itself hung (observed on a machine with only Tailscale/NetBird and no LAN, where an exit-node routing quirk let the lightweight port-445 race check succeed but the actual mount command stall), this blocked the UI thread indefinitely - including the tray icon context menu, since auto-mount-on-startup runs on the UI thread. Now bounded to 15s with a "Timeout" status on failure instead of hanging forever.
 
 ### v7.5.0 - Live failover
