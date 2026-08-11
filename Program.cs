@@ -10,6 +10,7 @@ using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Win32;
 
 namespace FileserverDriveManager
@@ -148,6 +149,16 @@ namespace FileserverDriveManager
         private bool darkModeEnabled = false;
         private string username = "";
         private string password = "";
+        // v7.3: three possible paths to the fileserver instead of one fixed
+        // IP. "fileserverIP" (below) stays as-is throughout the codebase -
+        // it now means "the currently resolved/active IP for this session",
+        // set by RaceFileserverIPs() whenever Authenticate is clicked, rather
+        // than a fixed user-entered value. Every existing mount/test/share-
+        // listing call site keeps working unchanged since they all just read
+        // fileserverIP as before.
+        private string fileserverLanIP = "192.168.1.26";
+        private string fileserverTailscaleIP = "100.64.0.2";
+        private string fileserverNetbirdIP = "10.64.75.22";
         private string fileserverIP = "192.168.1.26";
         private string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FileserverDriveManager.log");
         private System.Windows.Forms.Timer statusTimer;
@@ -176,10 +187,10 @@ namespace FileserverDriveManager
             RefreshStatus();
             
             // Auto-enable startup on first run
-            this.Load += (s, e) => 
+            this.Load += async (s, e) => 
             {
                 EnableAutoStartup();
-                CheckAndAutoConnect();
+                await CheckAndAutoConnect();
             };
         }
 
@@ -216,7 +227,7 @@ namespace FileserverDriveManager
             }
         }
 
-        private void CheckAndAutoConnect()
+        private async Task CheckAndAutoConnect()
         {
             // Wait 10 seconds for Windows network to fully initialize
             System.Threading.Thread.Sleep(10000);
@@ -255,6 +266,23 @@ namespace FileserverDriveManager
                 Log("Auto-authenticating with saved credentials...");
                 try
                 {
+                    // v7.3: race the same LAN/Tailscale/NetBird candidates the
+                    // manual Authenticate button uses, rather than mounting
+                    // against whatever fileserverIP happens to hold from a
+                    // previous session (which could be stale if the network
+                    // situation changed between launches).
+                    var raceResults = await RaceFileserverIPs();
+                    var fastest = raceResults.FirstOrDefault(r => r.Success);
+                    if (fastest.IP == null)
+                    {
+                        Log("Auto-connect: fileserver not reachable on LAN, Tailscale, or NetBird");
+                        statusLabel.Text = "Fileserver not reachable - VPN may need manual start";
+                        statusTimer.Start();
+                        return;
+                    }
+                    fileserverIP = fastest.IP;
+                    Log($"Auto-connect using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
+
                     if (TestFileserverConnection(username, password))
                     {
                         statusLabel.Text = "Auto-authenticated on startup";
@@ -805,7 +833,7 @@ namespace FileserverDriveManager
             // Timer will be started AFTER CheckAndAutoConnect completes
         }
 
-        private void AuthenticateButton_Click(object sender, EventArgs e)
+        private async void AuthenticateButton_Click(object sender, EventArgs e)
         {
             username = usernameBox.Text.Trim();
             password = passwordBox.Text;
@@ -818,7 +846,24 @@ namespace FileserverDriveManager
 
             isAuthenticating = true;
             authenticateButton.Enabled = false;
-            statusLabel.Text = "Authenticating...";
+
+            // v7.3: race LAN/Tailscale/NetBird paths to the fileserver and use
+            // whichever responds fastest, instead of a single fixed IP. This
+            // is what makes Authenticate work correctly regardless of which
+            // network(s) happen to be up right now.
+            statusLabel.Text = "Checking LAN, Tailscale, and NetBird...";
+            var raceResults = await RaceFileserverIPs();
+            var fastest = raceResults.FirstOrDefault(r => r.Success);
+            if (fastest.IP == null)
+            {
+                statusLabel.Text = "Fileserver not reachable on LAN, Tailscale, or NetBird";
+                authenticateButton.Enabled = true;
+                isAuthenticating = false;
+                return;
+            }
+            fileserverIP = fastest.IP;
+            Log($"Authenticate using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
+            statusLabel.Text = $"Using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms) - Authenticating...";
 
             try
             {
@@ -830,7 +875,7 @@ namespace FileserverDriveManager
                     return;
                 }
 
-                statusLabel.Text = "Authentication successful - Loading shares...";
+                statusLabel.Text = $"Connected via {fastest.Label} - Loading shares...";
 
                 PopulateAvailableDriveLetters();
                 
@@ -857,7 +902,7 @@ namespace FileserverDriveManager
                 addDriveButton.Enabled = true;
                 mountDrivesButton.Enabled = true;
 
-                statusLabel.Text = $"Ready - {shareNameBox.Items.Count} shares available";
+                statusLabel.Text = $"Ready via {fastest.Label} - {shareNameBox.Items.Count} shares available";
                 SaveCurrentSettings();
             }
             catch (Exception ex)
@@ -954,7 +999,7 @@ namespace FileserverDriveManager
         {
             Form settingsForm = new Form();
             settingsForm.Text = "Settings";
-            settingsForm.Size = new Size(600, 500);
+            settingsForm.Size = new Size(600, 580);
             settingsForm.StartPosition = FormStartPosition.CenterParent;
             settingsForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             settingsForm.MaximizeBox = false;
@@ -967,7 +1012,7 @@ namespace FileserverDriveManager
             // and its top padding (8px) were added on top of what GroupBox
             // used to absorb more compactly via its built-in title, which cut
             // off the auto-mount checkbox row at the bottom of the card.
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 235));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 315));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -978,38 +1023,59 @@ namespace FileserverDriveManager
             Panel networkBox = new Panel() { Dock = DockStyle.Fill, Padding = new Padding(14, 12, 14, 14), BackColor = AppTheme.BgWhite };
             networkBox.ApplyCardStyle(AppTheme.BorderGray);
             Label networkHeader = new Label() { Text = "Network settings", Dock = DockStyle.Top, Height = 24, Font = new Font("Segoe UI", 10F, FontStyle.Bold), ForeColor = AppTheme.TextPrimary };
-            TableLayoutPanel networkLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 4, Padding = new Padding(0, 8, 0, 0) };
+            TableLayoutPanel networkLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, Padding = new Padding(0, 8, 0, 0) };
             networkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             networkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            for (int i = 0; i < 6; i++)
+                networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
 
-            Label ipLabel = new Label() { Text = "Fileserver IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            TextBox ipBox = new TextBox() { Text = fileserverIP, Dock = DockStyle.Fill };
-            networkLayout.Controls.Add(ipLabel, 0, 0);
-            networkLayout.Controls.Add(ipBox, 1, 0);
+            // v7.3: three candidate IPs instead of one - LAN, Tailscale, and
+            // NetBird. Authenticate races all three (see RaceFileserverIPs)
+            // and uses whichever responds fastest, rather than a fixed IP.
+            Label lanIPFieldLabel = new Label() { Text = "LAN IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            TextBox lanIPBox = new TextBox() { Text = fileserverLanIP, Dock = DockStyle.Fill };
+            networkLayout.Controls.Add(lanIPFieldLabel, 0, 0);
+            networkLayout.Controls.Add(lanIPBox, 1, 0);
+
+            Label tailscaleIPFieldLabel = new Label() { Text = "Tailscale IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            TextBox tailscaleIPFieldBox = new TextBox() { Text = fileserverTailscaleIP, Dock = DockStyle.Fill };
+            networkLayout.Controls.Add(tailscaleIPFieldLabel, 0, 1);
+            networkLayout.Controls.Add(tailscaleIPFieldBox, 1, 1);
+
+            Label netbirdIPFieldLabel = new Label() { Text = "NetBird IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            TextBox netbirdIPFieldBox = new TextBox() { Text = fileserverNetbirdIP, Dock = DockStyle.Fill };
+            networkLayout.Controls.Add(netbirdIPFieldLabel, 0, 2);
+            networkLayout.Controls.Add(netbirdIPFieldBox, 1, 2);
 
             Button testButton = new Button() { Text = "Test Connection", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
             testButton.FlatAppearance.BorderSize = 1;
             testButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
-            testButton.Click += (s, ev) =>
+            testButton.Click += async (s, ev) =>
             {
-                // Tests reachability of whatever IP is currently typed in the box
-                // (not necessarily the saved fileserverIP), and doesn't require
-                // valid credentials or a specific share to exist - just "can this
-                // host be reached on the SMB port". Real credential/share testing
-                // still happens on Authenticate.
-                string ipToTest = ipBox.Text.Trim();
-                if (TestFileserverReachability(ipToTest))
+                // Tests reachability of whatever is currently typed in all three
+                // boxes (not necessarily saved values yet), races them the same
+                // way Authenticate does, and shows each result ranked by speed.
+                string prevLan = fileserverLanIP, prevTs = fileserverTailscaleIP, prevNb = fileserverNetbirdIP;
+                fileserverLanIP = lanIPBox.Text.Trim();
+                fileserverTailscaleIP = tailscaleIPFieldBox.Text.Trim();
+                fileserverNetbirdIP = netbirdIPFieldBox.Text.Trim();
+                testButton.Enabled = false;
+                testButton.Text = "Testing...";
+                var results = await RaceFileserverIPs();
+                testButton.Enabled = true;
+                testButton.Text = "Test Connection";
+                fileserverLanIP = prevLan; fileserverTailscaleIP = prevTs; fileserverNetbirdIP = prevNb;
+
+                if (results.Count == 0)
                 {
-                    MessageBox.Show($"Reached {ipToTest} (SMB port 445 open).", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("No IPs entered to test.", "Nothing to test", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
-                else
-                {
-                    MessageBox.Show($"Could not reach {ipToTest} on port 445. Check IP, network/VPN connectivity, or that SMB is enabled on that host.", "Connection Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                string summary = string.Join("\n", results.Select(r =>
+                    $"{r.Label} ({r.IP}): {(r.Success ? $"{r.ElapsedMs}ms" : "unreachable")}"));
+                bool anySuccess = results.Any(r => r.Success);
+                MessageBox.Show(summary, anySuccess ? "Results (fastest first)" : "All unreachable",
+                    MessageBoxButtons.OK, anySuccess ? MessageBoxIcon.Information : MessageBoxIcon.Error);
             };
 
             Button saveIPButton = new Button() { Text = "Save IP", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
@@ -1017,13 +1083,15 @@ namespace FileserverDriveManager
             saveIPButton.ApplyRoundedFilledStyle(AppTheme.Accent, Color.White);
             saveIPButton.Click += (s, ev) =>
             {
-                fileserverIP = ipBox.Text.Trim();
+                fileserverLanIP = lanIPBox.Text.Trim();
+                fileserverTailscaleIP = tailscaleIPFieldBox.Text.Trim();
+                fileserverNetbirdIP = netbirdIPFieldBox.Text.Trim();
                 SaveCurrentSettings();
-                MessageBox.Show("IP saved!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("IPs saved!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
-            networkLayout.Controls.Add(testButton, 0, 1);
-            networkLayout.Controls.Add(saveIPButton, 1, 1);
+            networkLayout.Controls.Add(testButton, 0, 3);
+            networkLayout.Controls.Add(saveIPButton, 1, 3);
 
             CheckBox autoMountCheckbox = new CheckBox() { Text = "Auto-mount drives when VPN IP is active", Dock = DockStyle.Fill, Checked = autoMountOnStartup };
             autoMountCheckbox.CheckedChanged += (s, ev) =>
@@ -1032,7 +1100,7 @@ namespace FileserverDriveManager
                 SaveCurrentSettings();
             };
             networkLayout.SetColumnSpan(autoMountCheckbox, 2);
-            networkLayout.Controls.Add(autoMountCheckbox, 0, 2);
+            networkLayout.Controls.Add(autoMountCheckbox, 0, 4);
 
             CheckBox darkModeCheckbox = new CheckBox() { Text = "Dark mode (restart to apply)", Dock = DockStyle.Fill, Checked = darkModeEnabled };
             darkModeCheckbox.CheckedChanged += (s, ev) =>
@@ -1044,7 +1112,7 @@ namespace FileserverDriveManager
                     "Restart required", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
             networkLayout.SetColumnSpan(darkModeCheckbox, 2);
-            networkLayout.Controls.Add(darkModeCheckbox, 0, 3);
+            networkLayout.Controls.Add(darkModeCheckbox, 0, 5);
 
             networkBox.Controls.Add(networkLayout);
             networkBox.Controls.Add(networkHeader);
@@ -1626,6 +1694,25 @@ namespace FileserverDriveManager
                     if (settings.ContainsKey("fileserverIP") && settings["fileserverIP"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
                         fileserverIP = settings["fileserverIP"].GetString();
+                        // v7.3 migration: older settings files only have this
+                        // single legacy key. Treat it as the LAN candidate so
+                        // existing users' saved IP isn't lost when upgrading.
+                        if (!settings.ContainsKey("fileserverLanIP"))
+                        {
+                            fileserverLanIP = fileserverIP;
+                        }
+                    }
+                    if (settings.ContainsKey("fileserverLanIP") && settings["fileserverLanIP"].ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        fileserverLanIP = settings["fileserverLanIP"].GetString();
+                    }
+                    if (settings.ContainsKey("fileserverTailscaleIP") && settings["fileserverTailscaleIP"].ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        fileserverTailscaleIP = settings["fileserverTailscaleIP"].GetString();
+                    }
+                    if (settings.ContainsKey("fileserverNetbirdIP") && settings["fileserverNetbirdIP"].ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        fileserverNetbirdIP = settings["fileserverNetbirdIP"].GetString();
                     }
 
                     if (settings.ContainsKey("autoMountOnStartup"))
@@ -1676,6 +1763,9 @@ namespace FileserverDriveManager
                     { "username", username },
                     { "password", EncryptPassword(password) },
                     { "fileserverIP", fileserverIP },
+                    { "fileserverLanIP", fileserverLanIP },
+                    { "fileserverTailscaleIP", fileserverTailscaleIP },
+                    { "fileserverNetbirdIP", fileserverNetbirdIP },
                     { "autoMountOnStartup", autoMountOnStartup },
                     { "darkMode", darkModeEnabled },
                     { "drives", drives }
@@ -1690,6 +1780,45 @@ namespace FileserverDriveManager
             {
                 Log("Error saving settings: " + ex.Message);
             }
+        }
+
+        // v7.3: races all three configured fileserver paths (LAN, Tailscale,
+        // NetBird) concurrently via a timed TCP connect to port 445, and
+        // returns them ranked fastest-first. Candidates with an empty IP are
+        // skipped. Run concurrently (not sequentially) so this doesn't cost
+        // 3x the per-candidate timeout - the whole race takes as long as the
+        // slowest candidate's timeout, not the sum of all three.
+        private async Task<List<(string Label, string IP, long ElapsedMs, bool Success)>> RaceFileserverIPs()
+        {
+            var candidates = new List<(string Label, string IP)>();
+            if (!string.IsNullOrWhiteSpace(fileserverLanIP)) candidates.Add(("LAN", fileserverLanIP.Trim()));
+            if (!string.IsNullOrWhiteSpace(fileserverTailscaleIP)) candidates.Add(("Tailscale", fileserverTailscaleIP.Trim()));
+            if (!string.IsNullOrWhiteSpace(fileserverNetbirdIP)) candidates.Add(("NetBird", fileserverNetbirdIP.Trim()));
+
+            var tasks = candidates.Select(async c =>
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                bool success = false;
+                try
+                {
+                    using (var client = new System.Net.Sockets.TcpClient())
+                    {
+                        var connectTask = client.ConnectAsync(c.IP, 445);
+                        var completed = await Task.WhenAny(connectTask, Task.Delay(3000));
+                        success = completed == connectTask && client.Connected;
+                    }
+                }
+                catch { success = false; }
+                sw.Stop();
+                return (c.Label, c.IP, sw.ElapsedMilliseconds, success);
+            });
+
+            var results = (await Task.WhenAll(tasks)).ToList();
+            // Successful candidates first (fastest first), unreachable ones after
+            results = results.OrderBy(r => r.success ? 0 : 1).ThenBy(r => r.ElapsedMilliseconds).ToList();
+            foreach (var r in results)
+                Log($"[FileserverRace] {r.Label} ({r.IP}): {(r.success ? $"{r.ElapsedMilliseconds}ms" : "unreachable")}");
+            return results;
         }
 
         private bool TestFileserverReachability(string ip)
