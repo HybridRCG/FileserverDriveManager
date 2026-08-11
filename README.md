@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.3
+# Fileserver Drive Manager v7.5.4
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -65,7 +65,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.3 (Current)
+### v7.5.4 (Current)
+- Fixed the Tailscale IP/NetBird IP/Network status labels staying blank for a long time on startup - `UpdateNetworkStatus()` was only ever wired to the 5-second status timer, which didn't start until the entire race+authenticate+mount sequence finished. If mounting took a while, the labels sat empty that whole time even though the actual connection succeeded quickly. The timer (and an immediate first status update) now starts right after the initial 10s startup delay, independent of how long the rest of the sequence takes.
+
+### v7.5.3
 - Fixed the "Network:" status label picking up a VPN tunnel adapter's IP and mislabeling it as a physical LAN connection - it only excluded Tailscale's 100.x range before, never NetBird's (whose range varies per network), so on a machine with no physical LAN, NetBird's own address showed up as "(Ethernet)"
 - The fileserver race now shows **"LAN (via VPN route)"** instead of plain "LAN" when a configured LAN IP is only reachable because a VPN is advertising an exit-node route for that subnet, rather than a genuine direct connection - a raw TCP check can't tell the difference on its own, so this cross-checks against the client's own detected local subnet
 

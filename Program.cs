@@ -241,12 +241,22 @@ namespace FileserverDriveManager
             this.WindowState = FormWindowState.Minimized;
             this.ShowInTaskbar = false;
             notifyIcon.Visible = true;
+
+            // v7.5.4: UpdateNetworkStatus() (which populates the Tailscale
+            // IP/NetBird IP/Network labels) was only ever wired to the 5s
+            // statusTimer, which didn't Start() until this ENTIRE method
+            // finished - meaning the labels stayed blank through the full
+            // race+authenticate+mount sequence (which can take a while if
+            // any step is slow), even though the underlying connection
+            // itself succeeded quickly. Starting the timer here instead
+            // decouples the cosmetic status display from how long the rest
+            // of startup takes.
+            UpdateNetworkStatus();
+            statusTimer.Start();
             
             if (!autoMountOnStartup)
             {
                 Log("Auto-mount disabled - staying minimized");
-                // Start network status timer now that startup is complete
-                statusTimer.Start();
                 return;
             }
             
