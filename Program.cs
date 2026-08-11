@@ -147,6 +147,7 @@ namespace FileserverDriveManager
         private bool isAuthenticating = false;
         private bool autoMountOnStartup = true;
         private bool darkModeEnabled = false;
+        private bool isCheckingFailover = false;
         private string username = "";
         private string password = "";
         // v7.3: three possible paths to the fileserver instead of one fixed
@@ -636,7 +637,7 @@ namespace FileserverDriveManager
                 (Color bg, Color fg) = status switch
                 {
                     "Mounted" => (AppTheme.SuccessBg, AppTheme.SuccessText),
-                    "Failed" or "Error" => (AppTheme.DangerBg, AppTheme.DangerText),
+                    "Failed" or "Error" or "Timeout" => (AppTheme.DangerBg, AppTheme.DangerText),
                     _ => (AppTheme.MutedBg, AppTheme.MutedText)
                 };
                 RoundedRenderer.PaintStatusPill(e.Graphics, e.CellBounds, status, bg, fg, modernFontBold);
@@ -826,9 +827,13 @@ namespace FileserverDriveManager
             // Update status periodically - but NOT during startup!
             statusTimer = new System.Windows.Forms.Timer();
             statusTimer.Interval = 5000;
-            statusTimer.Tick += (s, e) => {
+            statusTimer.Tick += async (s, e) => {
                 UpdateNetworkStatus();
                 RefreshStatus();  // Also check drive mount status and update Mount All button
+                // v7.5.0: live failover check - only does real work when
+                // authenticated with drives active, and only switches when
+                // the current provider genuinely stops responding.
+                await CheckFileserverFailover();
             };
             // Timer will be started AFTER CheckAndAutoConnect completes
         }
@@ -1367,6 +1372,91 @@ namespace FileserverDriveManager
             }
         }
 
+        // v7.5.0: unmounts every currently-tracked drive without removing it
+        // from the saved list (unlike DismountAndRemoveDrive). Used internally
+        // by failover to release drives mapped against a now-dead IP before
+        // remounting them against the new one.
+        private void UnmountAllDrivesQuiet()
+        {
+            foreach (var drive in drives)
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "net",
+                        Arguments = $"use {drive.DriveLetter} /delete",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    using (Process process = new Process())
+                    {
+                        process.StartInfo = psi;
+                        process.Start();
+                        process.WaitForExit(5000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failover: error unmounting {drive.DriveLetter}: {ex.Message}");
+                }
+                drive.Status = "Not Mounted";
+            }
+            drivesGrid.DataSource = null;
+            drivesGrid.DataSource = drives;
+        }
+
+        // v7.5.0: live failover. Runs on every 5-second status tick, but only
+        // does real work (the actual TCP check) when there's something to
+        // protect - an authenticated session with drives mounted against a
+        // specific fileserverIP. Only switches when the CURRENT provider
+        // genuinely stops responding, never just because a technically
+        // faster path exists while everything's still working - this avoids
+        // disruptive flapping between providers with similar latency.
+        private async Task CheckFileserverFailover()
+        {
+            if (isCheckingFailover) return;
+            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password)) return;
+            if (string.IsNullOrEmpty(fileserverIP)) return;
+            if (drives.Count == 0) return;
+
+            isCheckingFailover = true;
+            try
+            {
+                bool stillReachable = await Task.Run(() => TestFileserverReachability(fileserverIP));
+                if (stillReachable) return;
+
+                Log($"Failover: current provider ({fileserverIP}) no longer reachable - re-racing...");
+                var raceResults = await RaceFileserverIPs();
+                var fastest = raceResults.FirstOrDefault(r => r.Success);
+                if (fastest.IP == null)
+                {
+                    Log("Failover: no configured provider is currently reachable");
+                    statusLabel.Text = "Fileserver unreachable on all configured paths";
+                    return;
+                }
+                if (fastest.IP == fileserverIP) return; // shouldn't normally happen, but guard anyway
+
+                string oldIP = fileserverIP;
+                Log($"Failover: switching from {oldIP} to {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
+                statusLabel.Text = $"Connection lost - switching to {fastest.Label}...";
+
+                UnmountAllDrivesQuiet();
+                fileserverIP = fastest.IP;
+                MountAllDrives();
+
+                int mountedCount = drives.Count(d => d.Status == "Mounted");
+                statusLabel.Text = $"Failed over to {fastest.Label} - {mountedCount} drives mounted";
+                Log($"Failover complete - now using {fastest.Label} ({fastest.IP}), {mountedCount} drives mounted");
+            }
+            finally
+            {
+                isCheckingFailover = false;
+            }
+        }
+
         private void MountAllDrives()
         {
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
@@ -1399,7 +1489,24 @@ namespace FileserverDriveManager
                     {
                         process.StartInfo = psi;
                         process.Start();
-                        process.WaitForExit();
+                        // v7.5.1: this previously had NO timeout at all. If
+                        // `net use` itself hangs - which can happen over an
+                        // unusual network path (e.g. NetBird/Tailscale exit-
+                        // node routing quirks) even when our lightweight
+                        // port-445 race check succeeded - this blocked the UI
+                        // thread indefinitely, since MountAllDrives runs
+                        // synchronously on the UI thread during startup
+                        // auto-connect. A hung net.exe would freeze the whole
+                        // app, including the tray icon context menu.
+                        bool exited = process.WaitForExit(15000);
+                        if (!exited)
+                        {
+                            try { process.Kill(); } catch { }
+                            drive.Status = "Timeout";
+                            failed++;
+                            Log($"Timed out mounting {drive.DriveLetter} (net use did not respond within 15s)");
+                            continue;
+                        }
 
                         // Exit code 0 = success, Exit code 2 = already mapped (also success)
                         // System error 85 (ERROR_ALREADY_ASSIGNED) appears in stderr but drive IS mounted

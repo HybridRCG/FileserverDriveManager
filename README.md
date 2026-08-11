@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.3.1
+# Fileserver Drive Manager v7.5.1
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -65,7 +65,15 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.3.1 (Current)
+### v7.5.1 (Current)
+- Fixed a real UI-freeze bug: `MountAllDrives()` had one `Process.WaitForExit()` call with no timeout at all. If `net use` itself hung (observed on a machine with only Tailscale/NetBird and no LAN, where an exit-node routing quirk let the lightweight port-445 race check succeed but the actual mount command stall), this blocked the UI thread indefinitely - including the tray icon context menu, since auto-mount-on-startup runs on the UI thread. Now bounded to 15s with a "Timeout" status on failure instead of hanging forever.
+
+### v7.5.0 - Live failover
+- The app now monitors the active fileserver connection every 5 seconds (piggybacking on the existing status timer) and automatically fails over to the next-fastest reachable path (LAN/Tailscale/NetBird) if the current one genuinely stops responding
+- Deliberately does NOT switch just because a marginally faster path exists while the current one still works - avoids disruptive flapping between providers with similar latency
+- On failover: unmounts all drives from the dead IP, re-races the remaining candidates, remounts against the winner, and logs the whole sequence
+
+### v7.3.1
 - Fixed the "Using {Provider}" status message vanishing before it could be read - the whole Authenticate → connect → list shares sequence can complete in under a second on a fast network, so the final status now permanently shows which provider was used ("Ready via Tailscale - 2 shares available") instead of a transient message that gets overwritten
 - Manual Authenticate now logs its provider race result (`Authenticate using {Provider} ({IP}, {ms}ms)`), matching what auto-connect-on-startup already logged, so the choice is always verifiable in View Logs afterward
 
