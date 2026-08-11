@@ -10,9 +10,9 @@
 
     <AssemblyName>FileserverDriveManager</AssemblyName>
     <RootNamespace>FileserverDriveManager</RootNamespace>
-    <Version>7.5.5</Version>
-    <FileVersion>7.5.5.0</FileVersion>
-    <AssemblyVersion>7.5.5.0</AssemblyVersion>
+    <Version>7.5.11</Version>
+    <FileVersion>7.5.11.0</FileVersion>
+    <AssemblyVersion>7.5.11.0</AssemblyVersion>
     <Company>Dyna Training</Company>
     <Product>Fileserver Drive Manager</Product>
 

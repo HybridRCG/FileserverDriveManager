@@ -17,9 +17,20 @@ namespace FileserverDriveManager
 {
     public class DriveMapping
     {
-        public string DriveLetter { get; set; }
-        public string ShareName { get; set; }
-        public string Status { get; set; }
+        // v7.5.7: 'required' tells the compiler every instantiation MUST set
+        // these (which was always true via object initializers throughout
+        // this codebase) - removes the CS8618 warnings correctly instead of
+        // just suppressing them, since the actual guarantee already existed.
+        public required string DriveLetter { get; set; }
+        public required string ShareName { get; set; }
+        public required string Status { get; set; }
+
+        // v7.5.6: runtime-only tracking for disconnect notifications - not
+        // persisted, since a fresh launch shouldn't remember a prior outage.
+        [System.Text.Json.Serialization.JsonIgnore]
+        public DateTime? UnavailableSince { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool DisconnectNotified { get; set; }
     }
 
     // ========================================================================
@@ -124,30 +135,40 @@ namespace FileserverDriveManager
 #endif
         
         private List<DriveMapping> drives = new List<DriveMapping>();
-        private TextBox usernameBox;
-        private TextBox passwordBox;
-        private ComboBox driveLetterBox;
-        private ComboBox shareNameBox;
-        private Button authenticateButton;
-        private DataGridView drivesGrid;
-        private Button addDriveButton;
-        private Button mountDrivesButton;
-        private Button settingsButton;
-        private Button viewLogsButton;
-        private Button tailscaleButton;
-        private Button netbirdButton;
-        private Button exitButton;
-        private Label statusLabel;
-        private Label tailscaleIPLabel;
-        private Label netbirdIPLabel;
-        private Label lanIPLabel;
-        private NotifyIcon notifyIcon;
-        private PictureBox logoPicture;
+        // v7.5.7: all of these are populated inside InitializeComponents()
+        // (called from the constructor), not via field initializers - the
+        // compiler's null-flow analysis can't see that far, so it flags them
+        // as possibly-null even though they're always set before use. `= null!`
+        // is the standard, honest way to express "this is definitely set
+        // elsewhere, trust me" for this exact WinForms pattern, rather than
+        // disabling nullable checking or making every field nullable (which
+        // would just push '?' null-checks onto every single usage site).
+        private TextBox usernameBox = null!;
+        private TextBox passwordBox = null!;
+        private ComboBox driveLetterBox = null!;
+        private ComboBox shareNameBox = null!;
+        private Button authenticateButton = null!;
+        private DataGridView drivesGrid = null!;
+        private Button addDriveButton = null!;
+        private Button mountDrivesButton = null!;
+        private Button settingsButton = null!;
+        private Button viewLogsButton = null!;
+        private Button tailscaleButton = null!;
+        private Button netbirdButton = null!;
+        private Button exitButton = null!;
+        private Label statusLabel = null!;
+        private Label tailscaleIPLabel = null!;
+        private Label netbirdIPLabel = null!;
+        private Label lanIPLabel = null!;
+        private NotifyIcon notifyIcon = null!;
+        private PictureBox logoPicture = null!;
+        private System.Windows.Forms.Timer statusTimer = null!;
         private bool isExiting = false;
         private bool isAuthenticating = false;
         private bool autoMountOnStartup = true;
         private bool darkModeEnabled = false;
         private bool isCheckingFailover = false;
+        private int disconnectNotifyMinutes = 30;
         private string username = "";
         private string password = "";
         // v7.3: three possible paths to the fileserver instead of one fixed
@@ -162,7 +183,6 @@ namespace FileserverDriveManager
         private string fileserverNetbirdIP = "10.64.75.22";
         private string fileserverIP = "192.168.1.26";
         private string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FileserverDriveManager.log");
-        private System.Windows.Forms.Timer statusTimer;
 
         public MainForm()
         {
@@ -222,10 +242,11 @@ namespace FileserverDriveManager
                 {
                     if (key != null)
                     {
-                        object existingValue = key.GetValue("FileserverDriveManager");
+                        object? existingValue = key.GetValue("FileserverDriveManager");
                         if (existingValue == null)
                         {
-                            string exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                            string? exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                            if (string.IsNullOrEmpty(exePath)) return;
                             string registryValue = $"\"{exePath}\"";
                             key.SetValue("FileserverDriveManager", registryValue);
                             Log($"Auto-startup enabled with path: {registryValue}");
@@ -393,7 +414,7 @@ namespace FileserverDriveManager
             // Load favicon
             try
             {
-                string faviconPath = null;
+                string? faviconPath = null;
                 string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 string userIconPath = Path.Combine(appDataPath, "FileserverDriveManager", "icon.png");
                 if (File.Exists(userIconPath))
@@ -428,7 +449,7 @@ namespace FileserverDriveManager
             notifyIcon.Icon = this.Icon ?? SystemIcons.Application;
             notifyIcon.Visible = false;
             notifyIcon.Text = "Fileserver Drive Manager";
-            notifyIcon.ContextMenuStrip = new ContextMenuStrip();
+            notifyIcon.ContextMenuStrip = new ContextMenuStrip() { BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             notifyIcon.ContextMenuStrip.Items.Add("Show", null, (s, e) => ShowFromTray());
             notifyIcon.ContextMenuStrip.Items.Add("Exit", null, (s, e) => Application.Exit());
             notifyIcon.DoubleClick += (s, e) => ShowFromTray();
@@ -481,10 +502,10 @@ namespace FileserverDriveManager
             credStackTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
             
             Label usernameLabel = new Label() { Text = "Username:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 10, 0), Font = modernFont, ForeColor = textPrimary };
-            usernameBox = new TextBox() { Dock = DockStyle.Fill, Font = modernFont, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 4, 8, 4) };
+            usernameBox = new TextBox() { Dock = DockStyle.Fill, Font = modernFont, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 4, 8, 4), BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             
             Label passwordLabel = new Label() { Text = "Password:", TextAlign = ContentAlignment.MiddleRight, Dock = DockStyle.Fill, Padding = new Padding(0, 0, 10, 0), Font = modernFont, ForeColor = textPrimary };
-            passwordBox = new TextBox() { PasswordChar = '●', Dock = DockStyle.Fill, Font = modernFont, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 4, 8, 4) };
+            passwordBox = new TextBox() { PasswordChar = '●', Dock = DockStyle.Fill, Font = modernFont, BorderStyle = BorderStyle.FixedSingle, Margin = new Padding(0, 4, 8, 4), BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             
             authenticateButton = new Button() { 
                 Text = "Authenticate", 
@@ -514,7 +535,7 @@ namespace FileserverDriveManager
             
             try
             {
-                string logoPath = null;
+                string? logoPath = null;
                 string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 string userLogoPath = Path.Combine(appDataPath, "FileserverDriveManager", "logo.png");
                 if (File.Exists(userLogoPath))
@@ -555,10 +576,10 @@ namespace FileserverDriveManager
             FlowLayoutPanel addFlow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(16, 12, 16, 12), BackColor = bgWhite };
 
             Label driveLetterLabel = new Label() { Text = "Drive Letter:", AutoSize = true, Font = modernFont, Margin = new Padding(0, 8, 8, 0), ForeColor = textPrimary };
-            driveLetterBox = new ComboBox() { Width = 70, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Standard };
+            driveLetterBox = new ComboBox() { Width = 70, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Standard, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             
             Label shareNameLabel = new Label() { Text = "Share Name:", AutoSize = true, Font = modernFont, Margin = new Padding(0, 8, 8, 0), ForeColor = textPrimary };
-            shareNameBox = new ComboBox() { Width = 280, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Standard };
+            shareNameBox = new ComboBox() { Width = 280, Font = modernFont, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 4, 20, 0), Enabled = false, FlatStyle = FlatStyle.Standard, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             
             addDriveButton = new Button() { 
                 Text = "Add Drive", 
@@ -661,17 +682,29 @@ namespace FileserverDriveManager
             // text draw, then draw our own rounded pill centered in the cell.
             drivesGrid.CellPainting += (s, e) =>
             {
-                if (e.RowIndex < 0 || drivesGrid.Columns[e.ColumnIndex].DataPropertyName != "Status" || e.Value == null)
+                if (e.RowIndex < 0) return;
+
+                if (drivesGrid.Columns[e.ColumnIndex] == removeColumn)
+                {
+                    // v7.5.6: fully custom-drawn to match the rounded outline
+                    // style used everywhere else - see PaintOutlineButtonCell.
+                    e.PaintBackground(e.CellBounds, true);
+                    RoundedRenderer.PaintOutlineButtonCell(e.Graphics!, e.CellBounds, "Unmount", AppTheme.Danger, AppTheme.BgWhite, modernFontBold);
+                    e.Handled = true;
+                    return;
+                }
+
+                if (drivesGrid.Columns[e.ColumnIndex].DataPropertyName != "Status" || e.Value == null)
                     return;
                 e.PaintBackground(e.CellBounds, true);
-                string status = e.Value.ToString();
+                string status = e.Value.ToString() ?? "";
                 (Color bg, Color fg) = status switch
                 {
                     "Mounted" => (AppTheme.SuccessBg, AppTheme.SuccessText),
                     "Failed" or "Error" or "Timeout" => (AppTheme.DangerBg, AppTheme.DangerText),
                     _ => (AppTheme.MutedBg, AppTheme.MutedText)
                 };
-                RoundedRenderer.PaintStatusPill(e.Graphics, e.CellBounds, status, bg, fg, modernFontBold);
+                RoundedRenderer.PaintStatusPill(e.Graphics!, e.CellBounds, status, bg, fg, modernFontBold);
                 e.Handled = true;
             };
             drivesGrid.CellContentClick += (s, e) =>
@@ -861,6 +894,11 @@ namespace FileserverDriveManager
             statusTimer.Tick += async (s, e) => {
                 UpdateNetworkStatus();
                 RefreshStatus();  // Also check drive mount status and update Mount All button
+                // v7.5.6: track how long each drive has been continuously
+                // unavailable and notify once it crosses the configured
+                // threshold. Runs right after RefreshStatus so it sees
+                // current mount state.
+                CheckDisconnectNotifications();
                 // v7.5.0: live failover check - only does real work when
                 // authenticated with drives active, and only switches when
                 // the current provider genuinely stops responding.
@@ -869,7 +907,43 @@ namespace FileserverDriveManager
             // Timer will be started AFTER CheckAndAutoConnect completes
         }
 
-        private async void AuthenticateButton_Click(object sender, EventArgs e)
+        // v7.5.6: notifies (via tray balloon) the first time a drive has been
+        // continuously unavailable for at least disconnectNotifyMinutes.
+        // Only fires once per outage (DisconnectNotified guards repeat
+        // notifications every 5s tick); resets automatically once the drive
+        // is mounted again, so a future outage notifies again.
+        private void CheckDisconnectNotifications()
+        {
+            foreach (var drive in drives)
+            {
+                if (drive.Status == "Mounted")
+                {
+                    drive.UnavailableSince = null;
+                    drive.DisconnectNotified = false;
+                    continue;
+                }
+
+                if (drive.UnavailableSince == null)
+                {
+                    drive.UnavailableSince = DateTime.Now;
+                    continue;
+                }
+
+                if (drive.DisconnectNotified) continue;
+
+                var elapsed = DateTime.Now - drive.UnavailableSince.Value;
+                if (elapsed.TotalMinutes >= disconnectNotifyMinutes)
+                {
+                    drive.DisconnectNotified = true;
+                    Log($"Disconnect notification: {drive.DriveLetter} ({drive.ShareName}) unavailable for {(int)elapsed.TotalMinutes} min");
+                    notifyIcon.ShowBalloonTip(10000, "Drive disconnected",
+                        $"{drive.DriveLetter} ({drive.ShareName}) has been unavailable for {disconnectNotifyMinutes}+ minutes.",
+                        ToolTipIcon.Warning);
+                }
+            }
+        }
+
+        private async void AuthenticateButton_Click(object? sender, EventArgs e)
         {
             username = usernameBox.Text.Trim();
             password = passwordBox.Text;
@@ -953,7 +1027,7 @@ namespace FileserverDriveManager
             }
         }
 
-        private void AddDriveButton_Click(object sender, EventArgs e)
+        private void AddDriveButton_Click(object? sender, EventArgs e)
         {
             if (driveLetterBox.SelectedItem == null || shareNameBox.SelectedItem == null)
             {
@@ -961,8 +1035,8 @@ namespace FileserverDriveManager
                 return;
             }
 
-            string driveLetter = driveLetterBox.SelectedItem.ToString();
-            string shareName = shareNameBox.SelectedItem.ToString();
+            string driveLetter = driveLetterBox.SelectedItem.ToString() ?? "";
+            string shareName = shareNameBox.SelectedItem.ToString() ?? "";
 
             if (drives.Any(d => d.DriveLetter == driveLetter))
             {
@@ -1026,16 +1100,16 @@ namespace FileserverDriveManager
             statusLabel.Text = $"Removed {drive.DriveLetter}";
         }
 
-        private async void MountDrivesButton_Click(object sender, EventArgs e)
+        private async void MountDrivesButton_Click(object? sender, EventArgs e)
         {
             await MountAllDrives();
         }
 
-        private void SettingsButton_Click(object sender, EventArgs e)
+        private void SettingsButton_Click(object? sender, EventArgs e)
         {
             Form settingsForm = new Form();
             settingsForm.Text = "Settings";
-            settingsForm.Size = new Size(600, 580);
+            settingsForm.Size = new Size(600, 620);
             settingsForm.StartPosition = FormStartPosition.CenterParent;
             settingsForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             settingsForm.MaximizeBox = false;
@@ -1048,7 +1122,7 @@ namespace FileserverDriveManager
             // and its top padding (8px) were added on top of what GroupBox
             // used to absorb more compactly via its built-in title, which cut
             // off the auto-mount checkbox row at the bottom of the card.
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 315));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 355));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -1059,27 +1133,27 @@ namespace FileserverDriveManager
             Panel networkBox = new Panel() { Dock = DockStyle.Fill, Padding = new Padding(14, 12, 14, 14), BackColor = AppTheme.BgWhite };
             networkBox.ApplyCardStyle(AppTheme.BorderGray);
             Label networkHeader = new Label() { Text = "Network settings", Dock = DockStyle.Top, Height = 24, Font = new Font("Segoe UI", 10F, FontStyle.Bold), ForeColor = AppTheme.TextPrimary };
-            TableLayoutPanel networkLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, Padding = new Padding(0, 8, 0, 0) };
+            TableLayoutPanel networkLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7, Padding = new Padding(0, 8, 0, 0) };
             networkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             networkLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)
                 networkLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
 
             // v7.3: three candidate IPs instead of one - LAN, Tailscale, and
             // NetBird. Authenticate races all three (see RaceFileserverIPs)
             // and uses whichever responds fastest, rather than a fixed IP.
             Label lanIPFieldLabel = new Label() { Text = "LAN IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            TextBox lanIPBox = new TextBox() { Text = fileserverLanIP, Dock = DockStyle.Fill };
+            TextBox lanIPBox = new TextBox() { Text = fileserverLanIP, Dock = DockStyle.Fill, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             networkLayout.Controls.Add(lanIPFieldLabel, 0, 0);
             networkLayout.Controls.Add(lanIPBox, 1, 0);
 
             Label tailscaleIPFieldLabel = new Label() { Text = "Tailscale IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            TextBox tailscaleIPFieldBox = new TextBox() { Text = fileserverTailscaleIP, Dock = DockStyle.Fill };
+            TextBox tailscaleIPFieldBox = new TextBox() { Text = fileserverTailscaleIP, Dock = DockStyle.Fill, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             networkLayout.Controls.Add(tailscaleIPFieldLabel, 0, 1);
             networkLayout.Controls.Add(tailscaleIPFieldBox, 1, 1);
 
             Label netbirdIPFieldLabel = new Label() { Text = "NetBird IP:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-            TextBox netbirdIPFieldBox = new TextBox() { Text = fileserverNetbirdIP, Dock = DockStyle.Fill };
+            TextBox netbirdIPFieldBox = new TextBox() { Text = fileserverNetbirdIP, Dock = DockStyle.Fill, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             networkLayout.Controls.Add(netbirdIPFieldLabel, 0, 2);
             networkLayout.Controls.Add(netbirdIPFieldBox, 1, 2);
 
@@ -1114,7 +1188,7 @@ namespace FileserverDriveManager
                     MessageBoxButtons.OK, anySuccess ? MessageBoxIcon.Information : MessageBoxIcon.Error);
             };
 
-            Button saveIPButton = new Button() { Text = "Save IP", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
+            Button saveIPButton = new Button() { Text = "Save IP's", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat };
             saveIPButton.FlatAppearance.BorderSize = 0;
             saveIPButton.ApplyRoundedFilledStyle(AppTheme.Accent, Color.White);
             saveIPButton.Click += (s, ev) =>
@@ -1149,6 +1223,20 @@ namespace FileserverDriveManager
             };
             networkLayout.SetColumnSpan(darkModeCheckbox, 2);
             networkLayout.Controls.Add(darkModeCheckbox, 0, 5);
+
+            // v7.5.6: notify (via a tray balloon) if a mounted drive has been
+            // unavailable continuously for this many minutes. See
+            // CheckDisconnectNotifications(), called from the same 5s status
+            // timer tick that already refreshes drive mount state.
+            Label notifyMinutesLabel = new Label() { Text = "Notify after (min):", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
+            NumericUpDown notifyMinutesBox = new NumericUpDown() { Minimum = 1, Maximum = 1440, Value = disconnectNotifyMinutes, Width = 60, Anchor = AnchorStyles.Left, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
+            notifyMinutesBox.ValueChanged += (s, ev) =>
+            {
+                disconnectNotifyMinutes = (int)notifyMinutesBox.Value;
+                SaveCurrentSettings();
+            };
+            networkLayout.Controls.Add(notifyMinutesLabel, 0, 6);
+            networkLayout.Controls.Add(notifyMinutesBox, 1, 6);
 
             networkBox.Controls.Add(networkLayout);
             networkBox.Controls.Add(networkHeader);
@@ -1204,7 +1292,7 @@ namespace FileserverDriveManager
             settingsForm.ShowDialog();
         }
 
-        private void ViewLogsButton_Click(object sender, EventArgs e)
+        private void ViewLogsButton_Click(object? sender, EventArgs e)
         {
             if (File.Exists(logPath))
             {
@@ -1216,17 +1304,17 @@ namespace FileserverDriveManager
             }
         }
 
-        private void TailscaleButton_Click(object sender, EventArgs e)
+        private void TailscaleButton_Click(object? sender, EventArgs e)
         {
             LaunchTailscale();
         }
 
-        private void NetBirdButton_Click(object sender, EventArgs e)
+        private void NetBirdButton_Click(object? sender, EventArgs e)
         {
             LaunchNetBird();
         }
 
-        private void LogoPicture_Click(object sender, EventArgs e)
+        private void LogoPicture_Click(object? sender, EventArgs e)
         {
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Filter = "Image Files|*.png;*.jpg;*.jpeg;*.bmp";
@@ -1258,7 +1346,7 @@ namespace FileserverDriveManager
             }
         }
 
-        private void FaviconButton_Click(object sender, EventArgs e)
+        private void FaviconButton_Click(object? sender, EventArgs e)
         {
             OpenFileDialog dialog = new OpenFileDialog();
             dialog.Filter = "Image Files|*.png;*.ico";
@@ -1835,22 +1923,23 @@ namespace FileserverDriveManager
                 {
                     string json = File.ReadAllText(settingsPath);
                     var settings = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(json);
+                    if (settings == null) return;
 
                     if (settings.ContainsKey("username") && settings["username"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
-                        username = settings["username"].GetString();
+                        username = settings["username"].GetString() ?? "";
                         usernameBox.Text = username;
                     }
 
                     if (settings.ContainsKey("password") && settings["password"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
-                        password = DecryptPassword(settings["password"].GetString());
+                        password = DecryptPassword(settings["password"].GetString() ?? "");
                         passwordBox.Text = password;
                     }
 
                     if (settings.ContainsKey("fileserverIP") && settings["fileserverIP"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
-                        fileserverIP = settings["fileserverIP"].GetString();
+                        fileserverIP = settings["fileserverIP"].GetString() ?? fileserverIP;
                         // v7.3 migration: older settings files only have this
                         // single legacy key. Treat it as the LAN candidate so
                         // existing users' saved IP isn't lost when upgrading.
@@ -1861,15 +1950,15 @@ namespace FileserverDriveManager
                     }
                     if (settings.ContainsKey("fileserverLanIP") && settings["fileserverLanIP"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
-                        fileserverLanIP = settings["fileserverLanIP"].GetString();
+                        fileserverLanIP = settings["fileserverLanIP"].GetString() ?? fileserverLanIP;
                     }
                     if (settings.ContainsKey("fileserverTailscaleIP") && settings["fileserverTailscaleIP"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
-                        fileserverTailscaleIP = settings["fileserverTailscaleIP"].GetString();
+                        fileserverTailscaleIP = settings["fileserverTailscaleIP"].GetString() ?? fileserverTailscaleIP;
                     }
                     if (settings.ContainsKey("fileserverNetbirdIP") && settings["fileserverNetbirdIP"].ValueKind == System.Text.Json.JsonValueKind.String)
                     {
-                        fileserverNetbirdIP = settings["fileserverNetbirdIP"].GetString();
+                        fileserverNetbirdIP = settings["fileserverNetbirdIP"].GetString() ?? fileserverNetbirdIP;
                     }
 
                     if (settings.ContainsKey("autoMountOnStartup"))
@@ -1892,11 +1981,15 @@ namespace FileserverDriveManager
                     {
                         darkModeEnabled = settings["darkMode"].ValueKind == System.Text.Json.JsonValueKind.True;
                     }
+                    if (settings.ContainsKey("disconnectNotifyMinutes") && settings["disconnectNotifyMinutes"].ValueKind == System.Text.Json.JsonValueKind.Number)
+                    {
+                        disconnectNotifyMinutes = settings["disconnectNotifyMinutes"].GetInt32();
+                    }
 
                     if (settings.ContainsKey("drives"))
                     {
                         var drivesJson = settings["drives"].GetRawText();
-                        drives = System.Text.Json.JsonSerializer.Deserialize<List<DriveMapping>>(drivesJson);
+                        drives = System.Text.Json.JsonSerializer.Deserialize<List<DriveMapping>>(drivesJson) ?? new List<DriveMapping>();
                         drivesGrid.DataSource = drives;
                     }
 
@@ -1925,6 +2018,7 @@ namespace FileserverDriveManager
                     { "fileserverNetbirdIP", fileserverNetbirdIP },
                     { "autoMountOnStartup", autoMountOnStartup },
                     { "darkMode", darkModeEnabled },
+                    { "disconnectNotifyMinutes", disconnectNotifyMinutes },
                     { "drives", drives }
                 };
 
@@ -2345,6 +2439,27 @@ namespace FileserverDriveManager
                 g.FillPath(brush, path);
             }
             TextRenderer.DrawText(g, text, font, pillRect, textColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        // v7.5.6: matches the rounded outline button style used everywhere
+        // else in v7, for a DataGridViewButtonColumn cell (used by the
+        // per-row "Unmount" button). DataGridViewButtonColumn's own
+        // rendering is system-drawn and can't be rounded via properties -
+        // this fully replaces it via CellPainting, same technique as the
+        // status pills.
+        public static void PaintOutlineButtonCell(Graphics g, Rectangle cellBounds, string text, Color accentColor, Color bgColor, Font font)
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var rect = Rectangle.Inflate(cellBounds, -6, -6);
+            using (var path = GetRoundedRectPath(rect, ButtonRadius))
+            {
+                using (var brush = new SolidBrush(bgColor))
+                    g.FillPath(brush, path);
+                using (var pen = new Pen(accentColor, 1))
+                    g.DrawPath(pen, path);
+            }
+            TextRenderer.DrawText(g, text, font, rect, accentColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 

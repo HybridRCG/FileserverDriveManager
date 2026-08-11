@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.5
+# Fileserver Drive Manager v7.5.11
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -15,6 +15,8 @@ A Windows desktop application (.NET 8.0) that maps and manages SMB network drive
 🎯 **Auto-Startup** - Optional launch on Windows startup, minimizes to tray
 📡 **Reachability Testing** - Settings' "Test Connection" races all three configured IPs and shows each result ranked by speed, independent of credentials or share names
 🔧 **VPN Adapter Detection** - Detects Tailscale (100.64.0.0/10 CGNAT range) and NetBird (adapter name `wt0` / description "WireGuard Tunnel", any valid IPv4 - NetBird's address range is configurable per network)
+🔄 **Live Failover** - Monitors the active connection every 5 seconds and automatically switches to the next-fastest reachable path if the current one genuinely stops responding, remounting drives against it
+🔔 **Disconnect Notifications** - Configurable tray notification if a drive stays unavailable past a threshold (default 30 min)
 
 ## Drives
 
@@ -65,7 +67,27 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.5 (Current)
+### v7.5.11 (Current)
+- Renamed "Save IP" to "Save IP's" in Settings
+
+### v7.5.10
+- Fixed the "Notify after (min):" field stretching to fill the whole column - a 4-digit max value doesn't need a full-width text box, so it's now a compact 60px field instead
+
+### v7.5.9
+- Fixed the "Notify if disconnected for (minutes):" label wrapping to two lines and misaligning with its input field - shortened to "Notify after (min):"
+
+### v7.5.8
+- Cleaned up the remaining 6 nullable-reference compiler warnings (down from 54 total across v7.5.7 and this release) - null-coalescing on `ComboBox.SelectedItem.ToString()` and two icon-loading path variables
+
+### v7.5.7
+- Cleaned up 48 of the app's 54 nullable-reference compiler warnings: `DriveMapping` properties now use `required` instead of leaving them silently non-nullable, all `MainForm` UI fields (populated in `InitializeComponents()`, not the constructor) are explicitly annotated, all 9 event handler signatures now match `EventHandler`'s nullable `sender`, and JSON settings loading no longer silently assumes `GetString()` can't return null
+
+### v7.5.6 - Dark mode audit, visual consistency, disconnect notifications
+- **Dark mode**: fixed 8 controls that were never wired to `AppTheme` and stayed white-on-white in dark mode - username/password fields, drive letter/share dropdowns, all 3 fileserver IP fields, and the tray icon's right-click menu
+- **Visual consistency**: the per-row "Unmount" button is now a rounded outline button matching the rest of v7's design instead of a flat system-drawn `DataGridViewButtonColumn` rectangle
+- **New feature**: configurable disconnect notifications - Settings now has a "Notify after (min):" field (default 30); if a mounted drive stays unavailable that long, the app shows a Windows tray balloon notification. Fires once per outage and resets automatically once the drive reconnects.
+
+### v7.5.5
 - Fixed the window flashing visibly for the full 10-second startup delay before hiding to tray - it now hides immediately on launch instead of waiting until after the delay, so the app starts tray-only from the first instant like a proper background utility
 - Fixed a related bug where manually clicking "Show" from the tray during that startup delay would get silently undone the moment the delay finished, since the old hide-to-tray code ran unconditionally afterward
 
