@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.20
+# Fileserver Drive Manager v7.5.21
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.20 (Current)
+### v7.5.21 (Current)
+- Fixed a large visual gap between the "Notify after (min):" label and its numeric input in Settings - it used the same 50%-width grid cell pattern as the IP rows above it, which left the short label text stranded on the left with the numeric box starting at the column boundary far to the right. Now uses a tight flow layout so the box sits directly next to the label
+
+### v7.5.20
 - Fixed the update installer download failing with "The request was canceled due to the configured HttpClient.Timeout of 8 seconds elapsing" - the download reused the same HttpClient as the small JSON version-check API call, whose 8s timeout is right for that but nowhere near enough for a real ~100MB installer download. Now uses a separate client with a 5-minute timeout, streaming the download straight to disk instead of buffering the whole file in memory first
 
 ### v7.5.19

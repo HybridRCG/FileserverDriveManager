@@ -1430,15 +1430,26 @@ namespace FileserverDriveManager
             // unavailable continuously for this many minutes. See
             // CheckDisconnectNotifications(), called from the same 5s status
             // timer tick that already refreshes drive mount state.
-            Label notifyMinutesLabel = new Label() { Text = "Notify after (min):", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
-            NumericUpDown notifyMinutesBox = new NumericUpDown() { Minimum = 1, Maximum = 1440, Value = disconnectNotifyMinutes, Width = 60, Anchor = AnchorStyles.Left, BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
+            //
+            // v7.5.21: label+box were previously in separate 50%-width grid
+            // cells like the IP rows above, but that left a large visual gap
+            // here specifically - the label's short text sat left-aligned in
+            // a wide Dock=Fill cell, while the numeric box started at the
+            // column boundary far to the right. Wrapped in a FlowLayoutPanel
+            // instead so the box sits directly next to the label's actual
+            // text width rather than at the underlying grid's column edge.
+            FlowLayoutPanel notifyRow = new FlowLayoutPanel() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = false, BackColor = AppTheme.BgWhite };
+            Label notifyMinutesLabel = new Label() { Text = "Notify after (min):", AutoSize = true, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 11, 8, 0), ForeColor = AppTheme.TextPrimary };
+            NumericUpDown notifyMinutesBox = new NumericUpDown() { Minimum = 1, Maximum = 1440, Value = disconnectNotifyMinutes, Width = 60, Margin = new Padding(0, 8, 0, 0), BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             notifyMinutesBox.ValueChanged += (s, ev) =>
             {
                 disconnectNotifyMinutes = (int)notifyMinutesBox.Value;
                 SaveCurrentSettings();
             };
-            networkLayout.Controls.Add(notifyMinutesLabel, 0, 6);
-            networkLayout.Controls.Add(notifyMinutesBox, 1, 6);
+            notifyRow.Controls.Add(notifyMinutesLabel);
+            notifyRow.Controls.Add(notifyMinutesBox);
+            networkLayout.SetColumnSpan(notifyRow, 2);
+            networkLayout.Controls.Add(notifyRow, 0, 6);
 
             networkBox.Controls.Add(networkLayout);
             networkBox.Controls.Add(networkHeader);
