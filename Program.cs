@@ -344,7 +344,31 @@ namespace FileserverDriveManager
                 return;
             }
 
-            hasEverAutoConnected = await TryAutoConnectOnce();
+            // v7.5.15: real bug in the v7.5.14 retry logic - statusTimer was
+            // already running (started above) while this initial call could
+            // itself take 60s+ (VPN poll loop + race + auth + mount), but
+            // isRetryingStartupConnect was only ever set inside the PERIODIC
+            // retry block below, not around this initial call. Every 5s tick
+            // during that whole window saw hasEverAutoConnected still false
+            // and isRetryingStartupConnect still false, and launched ANOTHER
+            // concurrent TryAutoConnectOnce() on top of this one - multiple
+            // overlapping race/auth/mount attempts stepping on each other
+            // (one's CleanupStaleSession killing a session another was
+            // mid-authenticating with, two MountAllDrives() loops racing
+            // against the same drive list). This is what made auto-mount
+            // intermittent - whether it broke depended on how many ticks
+            // landed inside the startup window before this first call
+            // finished. Now guarded exactly like the retry block is.
+            isRetryingStartupConnect = true;
+            lastStartupRetryAttempt = DateTime.Now;
+            try
+            {
+                hasEverAutoConnected = await TryAutoConnectOnce();
+            }
+            finally
+            {
+                isRetryingStartupConnect = false;
+            }
         }
 
         // v7.5.14: extracted from CheckAndAutoConnect so the exact same
