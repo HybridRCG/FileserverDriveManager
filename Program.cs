@@ -21,9 +21,17 @@ namespace FileserverDriveManager
         // these (which was always true via object initializers throughout
         // this codebase) - removes the CS8618 warnings correctly instead of
         // just suppressing them, since the actual guarantee already existed.
+        //
+        // v7.5.12: Status is deliberately NOT required. It's transient runtime
+        // state (recomputed on every mount attempt), not meaningful persisted
+        // data - but System.Text.Json enforces 'required' on deserialize too,
+        // so a settings.json written by an older build (or hand-edited/missing
+        // the field for any reason) threw "missing required properties" and
+        // wiped out the entire drives list on load. DriveLetter/ShareName stay
+        // required since those ARE meaningful stored data worth failing loud on.
         public required string DriveLetter { get; set; }
         public required string ShareName { get; set; }
-        public required string Status { get; set; }
+        public string Status { get; set; } = "Not Mounted";
 
         // v7.5.6: runtime-only tracking for disconnect notifications - not
         // persisted, since a fresh launch shouldn't remember a prior outage.
@@ -168,6 +176,14 @@ namespace FileserverDriveManager
         private bool autoMountOnStartup = true;
         private bool darkModeEnabled = false;
         private bool isCheckingFailover = false;
+        // v7.5.12: backoff state for when NO configured provider is reachable.
+        // Without this, the 5s status timer re-raced all three candidates on
+        // every single tick while fully down, producing a fresh TCP-connect
+        // burst and 3 log lines roughly every 5-10s indefinitely. Backing off
+        // (capped) while down cuts that noise and network churn without
+        // slowing recovery once a path comes back (reset to 0 on any success).
+        private int consecutiveFailoverMisses = 0;
+        private DateTime lastFailoverAttempt = DateTime.MinValue;
         private int disconnectNotifyMinutes = 30;
         private string username = "";
         private string password = "";
@@ -325,18 +341,48 @@ namespace FileserverDriveManager
                     // previous session (which could be stale if the network
                     // situation changed between launches).
                     var raceResults = await RaceFileserverIPs();
-                    var fastest = raceResults.FirstOrDefault(r => r.Success);
-                    if (fastest.IP == null)
+                    var reachableCandidates = raceResults.Where(r => r.Success).ToList();
+                    if (reachableCandidates.Count == 0)
                     {
                         Log("Auto-connect: fileserver not reachable on LAN, Tailscale, or NetBird");
                         statusLabel.Text = "Fileserver not reachable - VPN may need manual start";
                         statusTimer.Start();
                         return;
                     }
-                    fileserverIP = fastest.IP;
-                    Log($"Auto-connect using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
 
-                    if (await TestFileserverConnection(username, password))
+                    // v7.5.12: try every TCP-reachable candidate, not just the
+                    // fastest one, before giving up. A port-445 TCP connect
+                    // succeeding (the race test) doesn't guarantee the SMB
+                    // auth layer is actually ready on that path yet - this was
+                    // observed repeatedly right after a VPN reconnect, where
+                    // the "fastest" candidate's TCP port was open but SMB auth
+                    // against it failed, while a manual retry a minute later
+                    // (often against a DIFFERENT candidate) succeeded fine.
+                    // Falling through the ranked list gives auto-mount the
+                    // same resilience the user was getting manually anyway.
+                    bool authSucceeded = false;
+                    foreach (var candidate in reachableCandidates)
+                    {
+                        fileserverIP = candidate.IP;
+                        Log($"Auto-connect using {candidate.Label} ({candidate.IP}, {candidate.ElapsedMs}ms)");
+
+                        // Best-effort: drop any stale session left over from a
+                        // prior failed attempt against this same IP before
+                        // retrying. A half-established session here is what
+                        // produced "System error 1219: multiple connections
+                        // ... using more than one user name" on later retries,
+                        // and can also make a subsequent net use hang.
+                        await CleanupStaleSession(candidate.IP);
+
+                        if (await TestFileserverConnection(username, password))
+                        {
+                            authSucceeded = true;
+                            break;
+                        }
+                        Log($"Auto-authentication via {candidate.Label} failed - trying next candidate");
+                    }
+
+                    if (authSucceeded)
                     {
                         statusLabel.Text = "Auto-authenticated on startup";
                         Log("Auto-authentication successful");
@@ -353,7 +399,8 @@ namespace FileserverDriveManager
                     }
                     else
                     {
-                        Log("Auto-authentication failed");
+                        Log("Auto-authentication failed on all reachable candidates");
+                        statusLabel.Text = "Authentication failed - check credentials or VPN";
                         // Start network status timer now that startup is complete
                         statusTimer.Start();
                         return;
@@ -975,6 +1022,11 @@ namespace FileserverDriveManager
             Log($"Authenticate using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
             statusLabel.Text = $"Using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms) - Authenticating...";
 
+            // v7.5.12: same stale-session cleanup as auto-connect, so repeated
+            // manual retries (e.g. right after a failed auto-connect attempt
+            // against this same IP) don't hit "System error 1219".
+            await CleanupStaleSession(fastest.IP);
+
             try
             {
                 if (!await TestFileserverConnection(username, password))
@@ -1541,21 +1593,39 @@ namespace FileserverDriveManager
             if (string.IsNullOrEmpty(fileserverIP)) return;
             if (drives.Count == 0) return;
 
+            // v7.5.12: while every provider has been unreachable, skip ticks
+            // according to a capped backoff (5s, 10s, 20s, 30s, then holds at
+            // 30s) instead of re-racing on every single 5s tick. Only applies
+            // once we've already seen at least one full miss - the first
+            // check after a genuine disconnect still fires immediately.
+            if (consecutiveFailoverMisses > 0)
+            {
+                double backoffSeconds = Math.Min(30, 5 * Math.Pow(2, consecutiveFailoverMisses - 1));
+                if ((DateTime.Now - lastFailoverAttempt).TotalSeconds < backoffSeconds) return;
+            }
+
             isCheckingFailover = true;
+            lastFailoverAttempt = DateTime.Now;
             try
             {
                 bool stillReachable = await Task.Run(() => TestFileserverReachability(fileserverIP));
-                if (stillReachable) return;
+                if (stillReachable)
+                {
+                    consecutiveFailoverMisses = 0;
+                    return;
+                }
 
                 Log($"Failover: current provider ({fileserverIP}) no longer reachable - re-racing...");
                 var raceResults = await RaceFileserverIPs();
                 var fastest = raceResults.FirstOrDefault(r => r.Success);
                 if (fastest.IP == null)
                 {
-                    Log("Failover: no configured provider is currently reachable");
+                    consecutiveFailoverMisses++;
+                    Log($"Failover: no configured provider is currently reachable (miss #{consecutiveFailoverMisses}, next check in up to {Math.Min(30, 5 * Math.Pow(2, consecutiveFailoverMisses - 1))}s)");
                     statusLabel.Text = "Fileserver unreachable on all configured paths";
                     return;
                 }
+                consecutiveFailoverMisses = 0;
                 if (fastest.IP == fileserverIP) return; // shouldn't normally happen, but guard anyway
 
                 string oldIP = fileserverIP;
@@ -1564,6 +1634,7 @@ namespace FileserverDriveManager
 
                 UnmountAllDrivesQuiet();
                 fileserverIP = fastest.IP;
+                await CleanupStaleSession(oldIP);
                 await MountAllDrives();
 
                 int mountedCount = drives.Count(d => d.Status == "Mounted");
@@ -1583,6 +1654,18 @@ namespace FileserverDriveManager
                 statusLabel.Text = "Please authenticate first";
                 return;
             }
+
+            // v7.5.12: clear any stale session against this server before
+            // mounting. Observed in the wild: after a string of failed
+            // auto-connect/auth retries against the same fileserverIP, the
+            // subsequent "net use <letter> \\ip\share ..." mount calls hung
+            // for the full 15s timeout on every drive even though a fresh
+            // authenticate + share-accessibility check had just succeeded
+            // seconds earlier. A leftover half-open session from the earlier
+            // churn is the most likely explanation - net use blocking while
+            // waiting on an existing session to that server. This is a no-op
+            // if there's nothing stale to clean up.
+            await CleanupStaleSession(fileserverIP);
 
             int success = 0;
             int failed = 0;
@@ -1988,9 +2071,29 @@ namespace FileserverDriveManager
 
                     if (settings.ContainsKey("drives"))
                     {
-                        var drivesJson = settings["drives"].GetRawText();
-                        drives = System.Text.Json.JsonSerializer.Deserialize<List<DriveMapping>>(drivesJson) ?? new List<DriveMapping>();
-                        drivesGrid.DataSource = drives;
+                        // v7.5.12: isolated in its own try/catch. This used to
+                        // be inside the same block as everything above, so a
+                        // single malformed/legacy drive entry (e.g. a required
+                        // property genuinely absent from the JSON) threw and
+                        // was caught by the OUTER catch below - which logged
+                        // "Error loading settings" but by that point username,
+                        // password, IPs, and other prefs had already been
+                        // applied successfully. The user just lost their drive
+                        // list silently while everything else looked fine.
+                        // Now a drives-specific failure only drops the drives,
+                        // logs clearly why, and lets the rest of settings load.
+                        try
+                        {
+                            var drivesJson = settings["drives"].GetRawText();
+                            drives = System.Text.Json.JsonSerializer.Deserialize<List<DriveMapping>>(drivesJson) ?? new List<DriveMapping>();
+                            drivesGrid.DataSource = drives;
+                        }
+                        catch (Exception drivesEx)
+                        {
+                            Log("Could not load saved drive mappings (settings file may be from an older version): " + drivesEx.Message);
+                            drives = new List<DriveMapping>();
+                            drivesGrid.DataSource = drives;
+                        }
                     }
 
                     Log("Settings loaded successfully");
@@ -2125,6 +2228,40 @@ namespace FileserverDriveManager
             }
             catch { }
             return false;
+        }
+
+        // v7.5.12: best-effort cleanup of any existing "net use" session against
+        // this server IP before (re)authenticating. Repeated auto-connect
+        // attempts across VPN reconnects/failovers could leave a half-open or
+        // stale session behind, which then surfaces later as either "System
+        // error 1219" (multiple connections using more than one username) on
+        // the next auth attempt, or a hung "net use" on mount because it's
+        // waiting on the existing session. Deliberately silent/short-timeout -
+        // this is just tidying up before we try again, not a critical step.
+        private async Task CleanupStaleSession(string ip)
+        {
+            try
+            {
+                using (Process process = new Process())
+                {
+                    process.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "net",
+                        Arguments = $"use \\\\{ip} /delete /y",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    process.Start();
+                    using (var cts = new System.Threading.CancellationTokenSource(3000))
+                    {
+                        try { await process.WaitForExitAsync(cts.Token); }
+                        catch (OperationCanceledException) { try { process.Kill(); } catch { } }
+                    }
+                }
+            }
+            catch { /* best-effort - a missing session to delete is not an error */ }
         }
 
         private bool TestFileserverReachability(string ip)
