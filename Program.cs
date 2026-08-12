@@ -184,6 +184,19 @@ namespace FileserverDriveManager
         // slowing recovery once a path comes back (reset to 0 on any success).
         private int consecutiveFailoverMisses = 0;
         private DateTime lastFailoverAttempt = DateTime.MinValue;
+        // v7.5.14: tracks whether auto-connect has EVER succeeded this
+        // session. The HKCU Run key gives no guarantee the app starts after
+        // Tailscale/NetBird are actually up - Windows starts Run entries
+        // early in logon with no dependency ordering, and VPN clients
+        // routinely take longer than that to establish a tunnel. If the
+        // initial startup attempt (see TryAutoConnectOnce) never manages to
+        // connect, the status timer keeps retrying with backoff until it
+        // does, instead of requiring the user to manually click Authenticate
+        // or fuss with Task Scheduler dependency ordering.
+        private bool hasEverAutoConnected = false;
+        private bool isRetryingStartupConnect = false;
+        private int consecutiveStartupRetryMisses = 0;
+        private DateTime lastStartupRetryAttempt = DateTime.MinValue;
         private int disconnectNotifyMinutes = 30;
         private string username = "";
         private string password = "";
@@ -330,22 +343,56 @@ namespace FileserverDriveManager
                 Log("Auto-mount disabled - staying minimized");
                 return;
             }
-            
+
+            hasEverAutoConnected = await TryAutoConnectOnce();
+        }
+
+        // v7.5.14: extracted from CheckAndAutoConnect so the exact same
+        // VPN-check + race + auth + mount sequence can be reused both for
+        // the initial startup attempt AND for periodic retries (fired from
+        // the status timer) if that initial attempt never managed to
+        // connect. Returns true only on a fully successful auto-mount.
+        private async Task<bool> TryAutoConnectOnce()
+        {
             Log("Auto-mount enabled - checking VPN connection...");
-            
-            string vpnIP = GetVPNIP();
+
+            // v7.5.14: was a single one-shot GetVPNIP() check - if the VPN
+            // client (Tailscale/NetBird) hadn't finished bringing up its
+            // tunnel by the time this ran, the app just gave up entirely for
+            // the rest of the session with "VPN may need manual start" and
+            // never looked again, since the Run key gives no guarantee this
+            // process starts AFTER the VPN client is actually connected.
+            // Now polls for up to 60s (12 x 5s) before giving up on THIS
+            // attempt - long enough to cover the typical VPN client startup
+            // lag without silently waiting forever. If it still isn't up
+            // after that, the caller's retry loop (see statusTimer tick)
+            // will try again later with backoff, so boot ordering stops
+            // mattering: the app just waits the VPN out, however long it
+            // takes, in the background.
+            string vpnIP = "";
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                vpnIP = GetVPNIP();
+                if (!string.IsNullOrEmpty(vpnIP) && !vpnIP.Contains("Not Connected"))
+                {
+                    break;
+                }
+                if (attempt == 0)
+                {
+                    Log("VPN not up yet - will keep checking for up to 60s...");
+                }
+                await Task.Delay(5000);
+            }
+
             if (string.IsNullOrEmpty(vpnIP) || vpnIP.Contains("Not Connected"))
             {
-                Log("VPN IP not found (checked Tailscale and NetBird) - VPN may need manual start");
-                // Don't auto-launch VPN - let user start it manually
-                // This prevents interfering with Windows network initialization
-                // Start network status timer now that startup is complete
-                statusTimer.Start();
-                return;
+                Log("VPN IP not found after 60s (checked Tailscale and NetBird) - will keep retrying in the background");
+                statusLabel.Text = "Waiting for VPN...";
+                return false;
             }
             else
             {
-                Log($"VPN IP already found: {vpnIP}");
+                Log($"VPN IP found: {vpnIP}");
             }
             
             if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
@@ -364,8 +411,7 @@ namespace FileserverDriveManager
                     {
                         Log("Auto-connect: fileserver not reachable on LAN, Tailscale, or NetBird");
                         statusLabel.Text = "Fileserver not reachable - VPN may need manual start";
-                        statusTimer.Start();
-                        return;
+                        return false;
                     }
 
                     // v7.5.12: try every TCP-reachable candidate, not just the
@@ -411,33 +457,25 @@ namespace FileserverDriveManager
                         await Task.Delay(3000);
                         
                         Log("All drives mounted - staying minimized in tray");
-                        // Start network status timer now that startup is complete
-                        statusTimer.Start();
-                        return;
+                        return true;
                     }
                     else
                     {
                         Log("Auto-authentication failed on all reachable candidates");
                         statusLabel.Text = "Authentication failed - check credentials or VPN";
-                        // Start network status timer now that startup is complete
-                        statusTimer.Start();
-                        return;
+                        return false;
                     }
                 }
                 catch (Exception ex)
                 {
                     Log("Auto-authentication error: " + ex.Message);
-                    // Start network status timer now that startup is complete
-                    statusTimer.Start();
-                    return;
+                    return false;
                 }
             }
             else
             {
                 Log("No saved credentials for auto-mount");
-                // Start network status timer now that startup is complete
-                statusTimer.Start();
-                return;
+                return false;
             }
         }
 
@@ -968,6 +1006,51 @@ namespace FileserverDriveManager
                 // authenticated with drives active, and only switches when
                 // the current provider genuinely stops responding.
                 await CheckFileserverFailover();
+                // v7.5.14: if the initial startup attempt never managed to
+                // connect (VPN wasn't up yet, fileserver unreachable, etc.),
+                // keep retrying here in the background with capped backoff
+                // (5s/10s/20s/40s/60s, holds at 60s) instead of requiring a
+                // manual Authenticate click. This is what removes the need
+                // for any boot-ordering trick against Tailscale/NetBird -
+                // the app just keeps waiting, however long it takes, without
+                // hammering the network every 5s tick.
+                if (!hasEverAutoConnected && !isRetryingStartupConnect && autoMountOnStartup
+                    && !string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
+                {
+                    double backoffSeconds = consecutiveStartupRetryMisses == 0
+                        ? 0
+                        : Math.Min(60, 5 * Math.Pow(2, consecutiveStartupRetryMisses - 1));
+                    if ((DateTime.Now - lastStartupRetryAttempt).TotalSeconds >= backoffSeconds)
+                    {
+                        // v7.5.14: TryAutoConnectOnce can run for 60s+ (its
+                        // own internal VPN poll loop, plus race/auth/mount) -
+                        // this Timer.Tick handler isn't awaited by the Timer
+                        // itself, so without this guard a new tick firing
+                        // every 5s during that window would kick off
+                        // overlapping retry attempts stacking on top of each
+                        // other, racing/mounting concurrently against the
+                        // same drives.
+                        isRetryingStartupConnect = true;
+                        lastStartupRetryAttempt = DateTime.Now;
+                        try
+                        {
+                            bool succeeded = await TryAutoConnectOnce();
+                            if (succeeded)
+                            {
+                                hasEverAutoConnected = true;
+                                consecutiveStartupRetryMisses = 0;
+                            }
+                            else
+                            {
+                                consecutiveStartupRetryMisses++;
+                            }
+                        }
+                        finally
+                        {
+                            isRetryingStartupConnect = false;
+                        }
+                    }
+                }
             };
             // Timer will be started AFTER CheckAndAutoConnect completes
         }
