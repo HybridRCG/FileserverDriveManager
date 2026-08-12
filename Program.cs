@@ -470,19 +470,20 @@ namespace FileserverDriveManager
                     // (often against a DIFFERENT candidate) succeeded fine.
                     // Falling through the ranked list gives auto-mount the
                     // same resilience the user was getting manually anyway.
+                    //
+                    // v7.5.23: stale-session cleanup moved to ONCE here,
+                    // before trying any candidate, covering all three
+                    // configured paths (not just whichever one is about to be
+                    // tried) - a session left open via a DIFFERENT path to
+                    // the same physical server can block/hang a fresh
+                    // connection via this candidate too, so clearing only the
+                    // current candidate's IP per-attempt wasn't enough.
+                    await CleanupAllStaleSessions();
                     bool authSucceeded = false;
                     foreach (var candidate in reachableCandidates)
                     {
                         fileserverIP = candidate.IP;
                         Log($"Auto-connect using {candidate.Label} ({candidate.IP}, {candidate.ElapsedMs}ms)");
-
-                        // Best-effort: drop any stale session left over from a
-                        // prior failed attempt against this same IP before
-                        // retrying. A half-established session here is what
-                        // produced "System error 1219: multiple connections
-                        // ... using more than one user name" on later retries,
-                        // and can also make a subsequent net use hang.
-                        await CleanupStaleSession(candidate.IP);
 
                         if (await TestFileserverConnection(username, password))
                         {
@@ -1178,6 +1179,13 @@ namespace FileserverDriveManager
                 // Authenticate again (which just re-races and gets a fresh
                 // attempt) was what actually fixed it. Now falls through
                 // every reachable candidate the same way auto-connect does.
+                //
+                // v7.5.23: stale-session cleanup moved to ONCE here, before
+                // trying any candidate, covering all three configured paths -
+                // a session left open via a DIFFERENT path to the same
+                // physical server can block/hang a fresh connection via this
+                // candidate too.
+                await CleanupAllStaleSessions();
                 bool authSucceeded = false;
                 (string Label, string IP, long ElapsedMs, bool Success) successfulCandidate = default;
                 foreach (var candidate in reachableCandidates)
@@ -1185,12 +1193,6 @@ namespace FileserverDriveManager
                     fileserverIP = candidate.IP;
                     Log($"Authenticate using {candidate.Label} ({candidate.IP}, {candidate.ElapsedMs}ms)");
                     statusLabel.Text = $"Using {candidate.Label} ({candidate.IP}, {candidate.ElapsedMs}ms) - Authenticating...";
-
-                    // v7.5.12: stale-session cleanup before each attempt, so
-                    // repeated retries (e.g. right after a failed auto-connect
-                    // attempt against this same IP) don't hit "System error
-                    // 1219".
-                    await CleanupStaleSession(candidate.IP);
 
                     if (await TestFileserverConnection(username, password))
                     {
@@ -1941,7 +1943,13 @@ namespace FileserverDriveManager
             // churn is the most likely explanation - net use blocking while
             // waiting on an existing session to that server. This is a no-op
             // if there's nothing stale to clean up.
-            await CleanupStaleSession(fileserverIP);
+            // v7.5.23: broadened to check ALL configured paths (LAN/Tailscale/
+            // NetBird), not just fileserverIP - a stale session via a
+            // DIFFERENT path to the same physical server can also block/hang
+            // a fresh mount via this path (confirmed real-world report: "net
+            // use did not respond within 15s" on LAN despite auth having just
+            // succeeded moments earlier).
+            await CleanupAllStaleSessions();
 
             int success = 0;
             int failed = 0;
@@ -2662,6 +2670,32 @@ namespace FileserverDriveManager
                 }
             }
             catch { /* best-effort - a missing session to delete is not an error */ }
+        }
+
+        // v7.5.23: broader version of the above - clears stale sessions
+        // against ALL THREE configured fileserver paths (LAN, Tailscale,
+        // NetBird), not just whichever one the current attempt is using.
+        // The single-IP cleanup above only guards against a stale session to
+        // the exact path being retried, but Windows only allows one
+        // credentialed SMB session per PHYSICAL server per client at a time -
+        // if an earlier attempt this session connected via a DIFFERENT path
+        // to the SAME server (e.g. VPN was up earlier, now LAN is being
+        // used), that now-stale session can block or hang a fresh connection
+        // via the current path even though the two IPs are literally
+        // different strings to Windows' net use. Confirmed pattern from an
+        // earlier real case (System error 1219, "multiple connections...
+        // different user name") and matches a report of "net use did not
+        // respond within 15s" on LAN despite auth having just succeeded.
+        // Runs the three cleanups concurrently since each is independently
+        // bounded (3s) and skips any IP that's blank/not configured.
+        private async Task CleanupAllStaleSessions()
+        {
+            var ips = new[] { fileserverLanIP, fileserverTailscaleIP, fileserverNetbirdIP }
+                .Where(ip => !string.IsNullOrWhiteSpace(ip))
+                .Select(ip => ip.Trim())
+                .Distinct()
+                .ToList();
+            await Task.WhenAll(ips.Select(CleanupStaleSession));
         }
 
         private bool TestFileserverReachability(string ip)
