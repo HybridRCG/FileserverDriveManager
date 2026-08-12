@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.18
+# Fileserver Drive Manager v7.5.19
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.18 (Current)
+### v7.5.19 (Current)
+- Fixed low-contrast/unreadable buttons in dark mode (and disabled-state buttons in both themes) - `ApplyRoundedOutlineStyle` (Close, Test Connection, Change Logo/Icon) hardcoded its background to plain white regardless of theme, so in dark mode it drew a literal white box behind text correctly colored for a *dark* background, reading as washed out; `ApplyRoundedFilledStyle`'s disabled state (e.g. "Up to Date") used fixed light-theme-assuming grays with too little contrast between them. Both now derive from `AppTheme` so they track whichever theme is active
+
+### v7.5.18
 - Added an update checker to Settings - checks GitHub Releases on open (and via manual re-click), shows "Up to date" or "Update to vX.Y.Z", and clicking the latter downloads the installer and launches it (the installer's existing `taskkill` step handles closing the running app at the right moment)
 
 ### v7.5.17

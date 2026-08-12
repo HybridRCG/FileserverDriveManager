@@ -2806,8 +2806,15 @@ namespace FileserverDriveManager
         {
             Color hoverColor = LightenColor(fillColor, 0.15f);
             Color pressColor = DarkenColor(fillColor, 0.10f);
-            Color disabledFill = Color.FromArgb(220, 218, 216);
-            Color disabledText = Color.FromArgb(150, 148, 146);
+            // v7.5.19: was hardcoded Color.FromArgb(220,218,216) / (150,148,146)
+            // - fixed light-theme-assuming grays that never adapted for dark
+            // mode, making disabled buttons (e.g. "Up to Date") hard to read
+            // there. Now derives from AppTheme so disabled fill/text stay
+            // theme-appropriate: BorderGray is already tuned per-mode (light
+            // gray on light theme, dark gray on dark theme) and TextSecondary
+            // already has adequate contrast against it in both.
+            Color disabledFill = AppTheme.BorderGray;
+            Color disabledText = AppTheme.TextSecondary;
             Color currentFill = fillColor;
 
             btn.FlatStyle = FlatStyle.Flat;
@@ -2850,8 +2857,17 @@ namespace FileserverDriveManager
         public static void ApplyRoundedOutlineStyle(this Button btn, Color accentColor)
         {
             Color hoverBg = LightenColor(accentColor, 0.92f);
-            Color disabledColor = Color.FromArgb(180, 178, 176);
-            Color currentBg = Color.White;
+            // v7.5.19: was hardcoded Color.FromArgb(180,178,176) for the
+            // disabled border/text color, and Color.White (below) for the
+            // button's own background - both fixed regardless of theme. The
+            // white background is the real problem: in dark mode this drew a
+            // literal white box while the text/border color correctly
+            // switched to the LIGHT gray meant to sit on a DARK background
+            // (see AppTheme.TextSecondary), so light-on-white read as washed
+            // out. Both now derive from AppTheme so they track whichever
+            // theme is actually active.
+            Color disabledColor = AppTheme.BorderGray;
+            Color currentBg = AppTheme.BgWhite;
 
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
@@ -2878,8 +2894,8 @@ namespace FileserverDriveManager
             };
 
             btn.MouseEnter += (s, e) => { if (btn.Enabled) { currentBg = hoverBg; btn.Invalidate(); } };
-            btn.MouseLeave += (s, e) => { if (btn.Enabled) { currentBg = Color.White; btn.Invalidate(); } };
-            btn.EnabledChanged += (s, e) => { currentBg = Color.White; btn.Invalidate(); };
+            btn.MouseLeave += (s, e) => { if (btn.Enabled) { currentBg = AppTheme.BgWhite; btn.Invalidate(); } };
+            btn.EnabledChanged += (s, e) => { currentBg = AppTheme.BgWhite; btn.Invalidate(); };
         }
 
         // Rounded "card" panel to replace a GroupBox - draws a subtle rounded
