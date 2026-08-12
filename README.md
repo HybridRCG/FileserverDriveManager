@@ -67,7 +67,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.15 (Current)
+### v7.5.16 (Current)
+- Auto-startup registration now skips entirely (no read or write) when running from a raw build-output folder (`\bin\Debug\` or `\bin\Release\`) rather than an actual install - previously the v7.5.13 self-heal would happily hijack the machine's permanent Windows boot-time auto-start slot to point at an ephemeral dev-build path (e.g. testing via `dev-build-run.bat`), overwriting whatever the real installed copy had registered
+
+### v7.5.15
 - Fixed a race condition in v7.5.14's background retry that could make auto-mount succeed or fail intermittently on restart, even with VPN already connected - the initial startup connection attempt wasn't guarded the same way the periodic retries were, so overlapping concurrent attempts could step on each other (one attempt's stale-session cleanup killing a session another was mid-authenticating with, concurrent mount loops racing against the same drive list)
 
 ### v7.5.14

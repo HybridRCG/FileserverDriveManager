@@ -267,13 +267,34 @@ namespace FileserverDriveManager
         {
             try
             {
+                string? currentExePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                if (string.IsNullOrEmpty(currentExePath)) return;
+
+                // v7.5.16: skip auto-startup registration entirely (don't
+                // read OR write the registry key) when running from a raw
+                // build-output folder rather than an actual install. Every
+                // MSBuild output path contains "\bin\Debug\" or "\bin\Release\"
+                // - the NSIS installer never produces that pattern, it always
+                // deploys straight into "...\FileserverDriveManager\
+                // FileserverDriveManager.exe". Without this check, running a
+                // dev build (e.g. via dev-build-run.bat on the test VM) would
+                // hijack the machine's permanent Windows boot-time auto-start
+                // slot away from any real installed copy, pointing it at an
+                // ephemeral debug path that can vanish or change on the very
+                // next build. A dev build launched for testing has no
+                // business claiming that slot at all.
+                if (currentExePath.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase)
+                    || currentExePath.Contains(@"\bin\Release\", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log($"Skipping auto-startup registration - running from a build-output folder, not an install: {currentExePath}");
+                    return;
+                }
+
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                 {
                     if (key != null)
                     {
-                        string? exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-                        if (string.IsNullOrEmpty(exePath)) return;
-                        string registryValue = $"\"{exePath}\"";
+                        string registryValue = $"\"{currentExePath}\"";
 
                         // v7.5.13: was "only write if the key doesn't exist yet",
                         // which meant a stale entry from an older install
