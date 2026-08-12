@@ -258,14 +258,32 @@ namespace FileserverDriveManager
                 {
                     if (key != null)
                     {
+                        string? exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                        if (string.IsNullOrEmpty(exePath)) return;
+                        string registryValue = $"\"{exePath}\"";
+
+                        // v7.5.13: was "only write if the key doesn't exist yet",
+                        // which meant a stale entry from an older install
+                        // location (e.g. the install directory changed between
+                        // installer versions - confirmed on a real machine
+                        // still pointing at an old x86 "Drive Manager" path
+                        // while the current installer.nsi targets a different
+                        // 64-bit "FileserverDriveManager" path) would NEVER get
+                        // corrected. If that old exe is later removed by an
+                        // uninstall/reinstall, auto-startup silently stops
+                        // working with no error and no log, since this code
+                        // path never runs again for that machine. Now it
+                        // compares against the currently running exe's actual
+                        // path and re-writes whenever they differ, so an
+                        // upgrade or a moved install self-heals on next launch.
                         object? existingValue = key.GetValue("FileserverDriveManager");
-                        if (existingValue == null)
+                        string? existingString = existingValue as string;
+                        if (existingString == null || !string.Equals(existingString, registryValue, StringComparison.OrdinalIgnoreCase))
                         {
-                            string? exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-                            if (string.IsNullOrEmpty(exePath)) return;
-                            string registryValue = $"\"{exePath}\"";
                             key.SetValue("FileserverDriveManager", registryValue);
-                            Log($"Auto-startup enabled with path: {registryValue}");
+                            Log(existingString == null
+                                ? $"Auto-startup enabled with path: {registryValue}"
+                                : $"Auto-startup path was stale ({existingString}) - corrected to: {registryValue}");
                         }
                     }
                 }
