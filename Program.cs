@@ -220,6 +220,16 @@ namespace FileserverDriveManager
         // that). GitHub's API rejects requests with no User-Agent header,
         // hence setting one below.
         private static readonly HttpClient updateHttpClient = new HttpClient() { Timeout = TimeSpan.FromSeconds(8) };
+        // v7.5.20: separate client for the actual installer download - the
+        // 8s timeout above is right for a small JSON API check (fail fast if
+        // GitHub is unreachable) but nowhere near enough for a real ~100MB
+        // self-contained single-file exe download, which was aborting with
+        // "The request was canceled due to the configured HttpClient.Timeout
+        // of 8 seconds elapsing" on a real machine. HttpClient.Timeout is
+        // per-client (applies to every request through that instance,
+        // overriding any per-call CancellationToken), so this needs its own
+        // instance rather than a per-request override.
+        private static readonly HttpClient downloadHttpClient = new HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
         private const string UPDATE_CHECK_URL = "https://api.github.com/repos/HybridRCG/FileserverDriveManager/releases/latest";
 
         public MainForm()
@@ -2557,8 +2567,21 @@ namespace FileserverDriveManager
             try
             {
                 string tempPath = Path.Combine(Path.GetTempPath(), $"FileserverDriveManager-Update-v{version}.exe");
-                byte[] data = await updateHttpClient.GetByteArrayAsync(downloadUrl);
-                await File.WriteAllBytesAsync(tempPath, data);
+                // v7.5.20: was GetByteArrayAsync via the 8s-timeout client
+                // (buffering the whole ~100MB exe in memory before writing
+                // it out) - now uses the long-timeout client and streams
+                // straight to disk, so memory use stays flat regardless of
+                // installer size and there's no chance of the same
+                // wrong-client mistake recurring here.
+                using (var response = await downloadHttpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    response.EnsureSuccessStatusCode();
+                    using (var contentStream = await response.Content.ReadAsStreamAsync())
+                    using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        await contentStream.CopyToAsync(fileStream);
+                    }
+                }
                 Log($"Downloaded update installer v{version} to {tempPath}");
                 Process.Start(new ProcessStartInfo { FileName = tempPath, UseShellExecute = true });
             }
