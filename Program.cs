@@ -11,6 +11,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Net.Http;
 using Microsoft.Win32;
 
 namespace FileserverDriveManager
@@ -212,6 +213,14 @@ namespace FileserverDriveManager
         private string fileserverNetbirdIP = "10.64.75.22";
         private string fileserverIP = "192.168.1.26";
         private string logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "FileserverDriveManager.log");
+
+        // v7.5.18: update check against GitHub Releases. Repo is public, so
+        // an unauthenticated API call works fine from any client machine
+        // (60 req/hour per IP - a manual/settings-open check is nowhere near
+        // that). GitHub's API rejects requests with no User-Agent header,
+        // hence setting one below.
+        private static readonly HttpClient updateHttpClient = new HttpClient() { Timeout = TimeSpan.FromSeconds(8) };
+        private const string UPDATE_CHECK_URL = "https://api.github.com/repos/HybridRCG/FileserverDriveManager/releases/latest";
 
         public MainForm()
         {
@@ -1289,7 +1298,7 @@ namespace FileserverDriveManager
         {
             Form settingsForm = new Form();
             settingsForm.Text = "Settings";
-            settingsForm.Size = new Size(600, 620);
+            settingsForm.Size = new Size(600, 665);
             settingsForm.StartPosition = FormStartPosition.CenterParent;
             settingsForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             settingsForm.MaximizeBox = false;
@@ -1297,13 +1306,16 @@ namespace FileserverDriveManager
             settingsForm.BackColor = AppTheme.BgLight;
             settingsForm.ForeColor = AppTheme.TextPrimary;
 
-            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(10) };
+            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(10) };
             // v7 fix: was 160 - too tight once the card header Label (24px)
             // and its top padding (8px) were added on top of what GroupBox
             // used to absorb more compactly via its built-in title, which cut
             // off the auto-mount checkbox row at the bottom of the card.
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 355));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            // v7.5.18: dedicated row for the update-check panel, between the
+            // branding buttons and the Information card.
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             // Network Settings Section
@@ -1448,6 +1460,96 @@ namespace FileserverDriveManager
             brandingPanel.Controls.Add(closeButton, 2, 0);
             mainLayout.Controls.Add(brandingPanel, 0, 1);
 
+            // Update Check Section
+            // v7.5.18: checks GitHub Releases for a newer version. The status
+            // label and button both live in one panel so their state stays in
+            // sync: "Check for Updates" -> "Checking..." -> either "Up to
+            // date" (disabled) or "Update to vX.Y.Z" (accent-filled, clicking
+            // downloads + launches the installer). Fired automatically as
+            // soon as Settings opens (fire-and-forget, non-blocking - the
+            // dialog itself doesn't wait on the network call) as well as via
+            // manual re-click.
+            TableLayoutPanel updatePanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0) };
+            updatePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
+            updatePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+
+            Label updateStatusLabel = new Label() { Text = $"Current version: {APP_VERSION}", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = AppTheme.TextSecondary, AutoEllipsis = true };
+            Button updateButton = new Button() { Text = "Check for Updates", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(5, 0, 0, 0) };
+            updateButton.FlatAppearance.BorderSize = 1;
+            updateButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
+
+            string? pendingUpdateUrl = null;
+            string pendingUpdateVersion = "";
+
+            async Task RunUpdateCheck()
+            {
+                updateButton.Enabled = false;
+                updateButton.Text = "Checking...";
+                var (available, latestVersion, downloadUrl) = await CheckForUpdateAsync();
+                if (available && !string.IsNullOrEmpty(downloadUrl))
+                {
+                    pendingUpdateUrl = downloadUrl;
+                    pendingUpdateVersion = latestVersion;
+                    updateStatusLabel.Text = $"Update available: v{latestVersion} (current: {APP_VERSION})";
+                    updateButton.Text = $"Update to v{latestVersion}";
+                    updateButton.ApplyRoundedFilledStyle(AppTheme.Accent, Color.White);
+                    updateButton.Enabled = true;
+                }
+                else if (available)
+                {
+                    // Newer tag found but no matching installer asset - don't
+                    // silently do nothing, point the user at the releases
+                    // page instead of guessing at a download URL.
+                    updateStatusLabel.Text = $"Update available: v{latestVersion}, but no installer asset was found";
+                    updateButton.Text = "Open Releases Page";
+                    updateButton.Enabled = true;
+                    updateButton.Click += (s2, ev2) => Process.Start(new ProcessStartInfo { FileName = "https://github.com/HybridRCG/FileserverDriveManager/releases/latest", UseShellExecute = true });
+                }
+                else if (string.IsNullOrEmpty(latestVersion))
+                {
+                    // CheckForUpdateAsync returns "" for latestVersion only on
+                    // a failed check (no network, GitHub unreachable, etc.) -
+                    // distinguishes that from a genuine "you're up to date".
+                    updateStatusLabel.Text = "Update check failed - see View Logs for details";
+                    updateButton.Text = "Retry Check";
+                    updateButton.Enabled = true;
+                }
+                else
+                {
+                    updateStatusLabel.Text = $"Up to date ({APP_VERSION})";
+                    updateButton.Text = "Up to Date";
+                    updateButton.Enabled = false;
+                }
+            }
+
+            updateButton.Click += async (s, ev) =>
+            {
+                if (!string.IsNullOrEmpty(pendingUpdateUrl))
+                {
+                    updateButton.Enabled = false;
+                    updateButton.Text = "Downloading...";
+                    await DownloadAndLaunchUpdate(pendingUpdateUrl, pendingUpdateVersion);
+                    // The installer (once launched) will taskkill and replace
+                    // this running instance - leave the button as-is rather
+                    // than re-enabling it, since a second click while the
+                    // installer is up would just redownload the same thing.
+                }
+                else
+                {
+                    await RunUpdateCheck();
+                }
+            };
+
+            updatePanel.Controls.Add(updateStatusLabel, 0, 0);
+            updatePanel.Controls.Add(updateButton, 1, 0);
+            mainLayout.Controls.Add(updatePanel, 0, 2);
+
+            // Fire-and-forget: check automatically as soon as Settings opens,
+            // so the button already reflects the real state without the user
+            // needing to click it first. Errors are already swallowed inside
+            // CheckForUpdateAsync/RunUpdateCheck, so this is safe to not await.
+            _ = RunUpdateCheck();
+
             // Information Section
             // v7 "full tier": Panel with rounded border + separate header, same
             // treatment as networkBox above.
@@ -1466,7 +1568,7 @@ namespace FileserverDriveManager
             };
             infoBox.Controls.Add(infoText);
             infoBox.Controls.Add(infoHeader);
-            mainLayout.Controls.Add(infoBox, 0, 2);
+            mainLayout.Controls.Add(infoBox, 0, 3);
 
             settingsForm.Controls.Add(mainLayout);
             settingsForm.ShowDialog();
@@ -2356,6 +2458,117 @@ namespace FileserverDriveManager
             }
             catch { }
             return false;
+        }
+
+        // v7.5.18: checks GitHub Releases for a newer tagged version than
+        // this build. Returns available=false (with no exception surfaced to
+        // the caller) on any network failure - an update check failing
+        // silently is fine, it just means the Settings button stays on
+        // "Check for Updates" rather than blocking anything. latestVersion
+        // is the bare "X.Y.Z" (no leading 'v'); downloadUrl points at the
+        // first .exe release asset whose name contains "Drive" (the NSIS
+        // installer, e.g. "Drive.Manager.V7.5.18.exe"), falling back to
+        // whatever .exe asset appears first if that name pattern ever
+        // changes.
+        private async Task<(bool available, string latestVersion, string? downloadUrl)> CheckForUpdateAsync()
+        {
+            try
+            {
+                if (!updateHttpClient.DefaultRequestHeaders.UserAgent.Any())
+                {
+                    updateHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("FileserverDriveManager-UpdateCheck");
+                }
+
+                string json = await updateHttpClient.GetStringAsync(UPDATE_CHECK_URL);
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+
+                string tagName = doc.RootElement.TryGetProperty("tag_name", out var tagEl) ? (tagEl.GetString() ?? "") : "";
+                string latestVersionStr = tagName.TrimStart('v', 'V');
+
+                // APP_VERSION is "v7.5.17" in Release builds, "v7.5.17-dev"
+                // in Debug builds - strip both the leading 'v' and any
+                // trailing "-dev" suffix so Version.TryParse succeeds either
+                // way.
+                string currentVersionStr = APP_VERSION.TrimStart('v', 'V');
+                int dashIndex = currentVersionStr.IndexOf('-');
+                if (dashIndex >= 0) currentVersionStr = currentVersionStr.Substring(0, dashIndex);
+
+                string? downloadUrl = null;
+                if (doc.RootElement.TryGetProperty("assets", out var assets))
+                {
+                    foreach (var asset in assets.EnumerateArray())
+                    {
+                        string name = asset.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "") : "";
+                        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
+                            name.Contains("Drive", StringComparison.OrdinalIgnoreCase))
+                        {
+                            downloadUrl = asset.TryGetProperty("browser_download_url", out var urlEl) ? urlEl.GetString() : null;
+                            break;
+                        }
+                    }
+                    if (downloadUrl == null)
+                    {
+                        foreach (var asset in assets.EnumerateArray())
+                        {
+                            string name = asset.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? "") : "";
+                            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                            {
+                                downloadUrl = asset.TryGetProperty("browser_download_url", out var urlEl) ? urlEl.GetString() : null;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                bool isNewer;
+                if (Version.TryParse(latestVersionStr, out var latestVer) && Version.TryParse(currentVersionStr, out var currentVer))
+                {
+                    isNewer = latestVer > currentVer;
+                }
+                else
+                {
+                    // Fallback if either string isn't a parseable Version
+                    // (shouldn't normally happen given the tagging scheme) -
+                    // treat any non-matching string as "different", so the
+                    // user at least sees something changed rather than the
+                    // check silently doing nothing.
+                    isNewer = !string.Equals(latestVersionStr, currentVersionStr, StringComparison.OrdinalIgnoreCase);
+                }
+
+                return (isNewer, latestVersionStr, downloadUrl);
+            }
+            catch (Exception ex)
+            {
+                Log("Update check failed: " + ex.Message);
+                return (false, "", null);
+            }
+        }
+
+        // v7.5.18: downloads the release installer to %TEMP% and launches it
+        // (UseShellExecute so Windows handles any UAC elevation prompt the
+        // installer needs). Deliberately does NOT kill or close the running
+        // app itself - installer.nsi already does "taskkill /F /IM
+        // FileserverDriveManager.exe" as its first install step, so the
+        // running instance gets closed by the installer at the right moment
+        // instead of leaving a gap where the user has no app open at all if
+        // they cancel partway through the installer.
+        private async Task DownloadAndLaunchUpdate(string downloadUrl, string version)
+        {
+            try
+            {
+                string tempPath = Path.Combine(Path.GetTempPath(), $"FileserverDriveManager-Update-v{version}.exe");
+                byte[] data = await updateHttpClient.GetByteArrayAsync(downloadUrl);
+                await File.WriteAllBytesAsync(tempPath, data);
+                Log($"Downloaded update installer v{version} to {tempPath}");
+                Process.Start(new ProcessStartInfo { FileName = tempPath, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Log("Update download/launch failed: " + ex.Message);
+                MessageBox.Show(
+                    $"Couldn't download or start the update installer.\n\n{ex.Message}\n\nYou can download it manually from the GitHub Releases page instead.",
+                    "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         // v7.5.12: best-effort cleanup of any existing "net use" session against

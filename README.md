@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.15
+# Fileserver Drive Manager v7.5.18
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -17,6 +17,7 @@ A Windows desktop application (.NET 8.0) that maps and manages SMB network drive
 🔧 **VPN Adapter Detection** - Detects Tailscale (100.64.0.0/10 CGNAT range) and NetBird (adapter name `wt0` / description "WireGuard Tunnel", any valid IPv4 - NetBird's address range is configurable per network)
 🔄 **Live Failover** - Monitors the active connection every 5 seconds and automatically switches to the next-fastest reachable path if the current one genuinely stops responding, remounting drives against it
 🔔 **Disconnect Notifications** - Configurable tray notification if a drive stays unavailable past a threshold (default 30 min)
+🆕 **Update Checker** - Settings checks GitHub Releases automatically and shows an "Update to vX.Y.Z" button when a newer version is available - one click downloads and launches the installer
 
 ## Drives
 
@@ -67,7 +68,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.17 (Current)
+### v7.5.18 (Current)
+- Added an update checker to Settings - checks GitHub Releases on open (and via manual re-click), shows "Up to date" or "Update to vX.Y.Z", and clicking the latter downloads the installer and launches it (the installer's existing `taskkill` step handles closing the running app at the right moment)
+
+### v7.5.17
 - Auto-mount no longer requires a VPN to be detected before it will even attempt the fileserver connection - previously it hard-gated on `GetVPNIP()` finding Tailscale or NetBird connected (polling for up to 60s) before ever trying the race at all, which completely broke auto-mount for LAN-only users (e.g. physically at the office) with no VPN client running, since it would give up every single time without ever testing the LAN IP. Now goes straight to the LAN/Tailscale/NetBird race, which already handles an absent/not-yet-ready VPN gracefully on its own
 
 ### v7.5.16
