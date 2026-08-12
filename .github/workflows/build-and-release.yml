@@ -102,8 +102,32 @@ jobs:
 
       - name: Install NSIS
         if: hashFiles('installer.nsi') != ''
-        run: choco install nsis -y --no-progress
         shell: pwsh
+        run: |
+          # v7.5.24 CI: choco's community feed has intermittently returned
+          # 504 Gateway Timeout ("Failed to fetch results from V2 feed..."),
+          # failing the whole release build even though nothing about the
+          # app itself changed - confirmed twice in a row on the same
+          # package/version. Retry with backoff instead of failing outright
+          # on the first transient hiccup, and verify by checking for the
+          # actual expected binary rather than trusting choco's exit code
+          # alone (which isn't always a reliable signal of partial failures).
+          $maxAttempts = 5
+          $delaySeconds = 15
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Installing NSIS via choco (attempt $attempt/$maxAttempts)..."
+            choco install nsis -y --no-progress
+            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") {
+              Write-Host "NSIS installed successfully."
+              exit 0
+            }
+            if ($attempt -lt $maxAttempts) {
+              Write-Host "NSIS install did not produce makensis.exe - retrying in ${delaySeconds}s..."
+              Start-Sleep -Seconds $delaySeconds
+              $delaySeconds = [Math]::Min($delaySeconds * 2, 120)
+            }
+          }
+          throw "NSIS install failed after $maxAttempts attempts (makensis.exe not found) - likely a Chocolatey community feed outage"
 
       - name: Build NSIS installer
         if: hashFiles('installer.nsi') != ''
