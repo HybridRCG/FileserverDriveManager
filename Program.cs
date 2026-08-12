@@ -1157,34 +1157,59 @@ namespace FileserverDriveManager
             // network(s) happen to be up right now.
             statusLabel.Text = "Checking LAN, Tailscale, and NetBird...";
             var raceResults = await RaceFileserverIPs();
-            var fastest = raceResults.FirstOrDefault(r => r.Success);
-            if (fastest.IP == null)
+            var reachableCandidates = raceResults.Where(r => r.Success).ToList();
+            if (reachableCandidates.Count == 0)
             {
                 statusLabel.Text = "Fileserver not reachable on LAN, Tailscale, or NetBird";
                 authenticateButton.Enabled = true;
                 isAuthenticating = false;
                 return;
             }
-            fileserverIP = fastest.IP;
-            Log($"Authenticate using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms)");
-            statusLabel.Text = $"Using {fastest.Label} ({fastest.IP}, {fastest.ElapsedMs}ms) - Authenticating...";
-
-            // v7.5.12: same stale-session cleanup as auto-connect, so repeated
-            // manual retries (e.g. right after a failed auto-connect attempt
-            // against this same IP) don't hit "System error 1219".
-            await CleanupStaleSession(fastest.IP);
 
             try
             {
-                if (!await TestFileserverConnection(username, password))
+                // v7.5.22: was "try only the fastest candidate, show
+                // 'Authentication failed' and stop if it doesn't work" - the
+                // exact same TCP-open-but-SMB-not-ready-yet race condition
+                // fixed for auto-connect back in v7.5.12 was never applied
+                // here, so a manual Authenticate click could fail even with
+                // the correct saved password, misleadingly making it look
+                // like a credentials/storage problem when clicking
+                // Authenticate again (which just re-races and gets a fresh
+                // attempt) was what actually fixed it. Now falls through
+                // every reachable candidate the same way auto-connect does.
+                bool authSucceeded = false;
+                (string Label, string IP, long ElapsedMs, bool Success) successfulCandidate = default;
+                foreach (var candidate in reachableCandidates)
                 {
-                    statusLabel.Text = "Authentication failed";
+                    fileserverIP = candidate.IP;
+                    Log($"Authenticate using {candidate.Label} ({candidate.IP}, {candidate.ElapsedMs}ms)");
+                    statusLabel.Text = $"Using {candidate.Label} ({candidate.IP}, {candidate.ElapsedMs}ms) - Authenticating...";
+
+                    // v7.5.12: stale-session cleanup before each attempt, so
+                    // repeated retries (e.g. right after a failed auto-connect
+                    // attempt against this same IP) don't hit "System error
+                    // 1219".
+                    await CleanupStaleSession(candidate.IP);
+
+                    if (await TestFileserverConnection(username, password))
+                    {
+                        authSucceeded = true;
+                        successfulCandidate = candidate;
+                        break;
+                    }
+                    Log($"Authenticate via {candidate.Label} failed - trying next candidate");
+                }
+
+                if (!authSucceeded)
+                {
+                    statusLabel.Text = "Authentication failed on all reachable paths - check credentials";
                     authenticateButton.Enabled = true;
                     isAuthenticating = false;
                     return;
                 }
 
-                statusLabel.Text = $"Connected via {fastest.Label} - Loading shares...";
+                statusLabel.Text = $"Connected via {successfulCandidate.Label} - Loading shares...";
 
                 PopulateAvailableDriveLetters();
                 
@@ -1211,7 +1236,7 @@ namespace FileserverDriveManager
                 addDriveButton.Enabled = true;
                 mountDrivesButton.Enabled = true;
 
-                statusLabel.Text = $"Ready via {fastest.Label} - {shareNameBox.Items.Count} shares available";
+                statusLabel.Text = $"Ready via {successfulCandidate.Label} - {shareNameBox.Items.Count} shares available";
                 SaveCurrentSettings();
             }
             catch (Exception ex)

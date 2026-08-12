@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.21
+# Fileserver Drive Manager v7.5.22
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.21 (Current)
+### v7.5.22 (Current)
+- Fixed the manual Authenticate button failing intermittently even with the correct saved password - it only ever tried the single fastest reachable candidate, so a fast-TCP-but-SMB-not-ready-yet path (the same race condition fixed for auto-connect in v7.5.12) would fail outright with no fallback. Clicking Authenticate again "fixed" it only because it re-raced and got a fresh attempt, not because anything about the password had changed. Now falls through every reachable candidate, matching auto-connect's behavior
+
+### v7.5.21
 - Fixed a large visual gap between the "Notify after (min):" label and its numeric input in Settings - it used the same 50%-width grid cell pattern as the IP rows above it, which left the short label text stranded on the left with the numeric box starting at the column boundary far to the right. Now uses a tight flow layout so the box sits directly next to the label
 
 ### v7.5.20
