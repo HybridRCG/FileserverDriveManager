@@ -399,50 +399,28 @@ namespace FileserverDriveManager
         // connect. Returns true only on a fully successful auto-mount.
         private async Task<bool> TryAutoConnectOnce()
         {
-            Log("Auto-mount enabled - checking VPN connection...");
-
-            // v7.5.14: was a single one-shot GetVPNIP() check - if the VPN
-            // client (Tailscale/NetBird) hadn't finished bringing up its
-            // tunnel by the time this ran, the app just gave up entirely for
-            // the rest of the session with "VPN may need manual start" and
-            // never looked again, since the Run key gives no guarantee this
-            // process starts AFTER the VPN client is actually connected.
-            // Now polls for up to 60s (12 x 5s) before giving up on THIS
-            // attempt - long enough to cover the typical VPN client startup
-            // lag without silently waiting forever. If it still isn't up
-            // after that, the caller's retry loop (see statusTimer tick)
-            // will try again later with backoff, so boot ordering stops
-            // mattering: the app just waits the VPN out, however long it
-            // takes, in the background.
-            string vpnIP = "";
-            for (int attempt = 0; attempt < 12; attempt++)
-            {
-                vpnIP = GetVPNIP();
-                if (!string.IsNullOrEmpty(vpnIP) && !vpnIP.Contains("Not Connected"))
-                {
-                    break;
-                }
-                if (attempt == 0)
-                {
-                    Log("VPN not up yet - will keep checking for up to 60s...");
-                }
-                await Task.Delay(5000);
-            }
-
-            if (string.IsNullOrEmpty(vpnIP) || vpnIP.Contains("Not Connected"))
-            {
-                Log("VPN IP not found after 60s (checked Tailscale and NetBird) - will keep retrying in the background");
-                statusLabel.Text = "Waiting for VPN...";
-                return false;
-            }
-            else
-            {
-                Log($"VPN IP found: {vpnIP}");
-            }
-            
+            // v7.5.17: was a hard gate - polled GetVPNIP() for up to 60s and
+            // returned false (never even attempting the race) if neither
+            // Tailscale nor NetBird reported connected. That completely broke
+            // auto-mount for anyone reaching the fileserver purely over LAN
+            // (e.g. users physically at the office) with no VPN client
+            // installed or running at all - GetVPNIP() would never find
+            // anything, every single attempt would give up before ever
+            // testing the LAN IP, forever, even though RaceFileserverIPs()
+            // below already tests LAN/Tailscale/NetBird independently and
+            // gracefully skips whichever aren't configured or reachable.
+            // The VPN check added no value the race doesn't already provide
+            // (an unreachable VPN IP just shows up as "unreachable" in the
+            // race, exactly like an absent LAN connection does) - it only
+            // ever hurt LAN-only users by blocking on something they don't
+            // use. Now goes straight to the race; VPN readiness naturally
+            // sorts itself out because a VPN-reliant candidate simply isn't
+            // reachable yet until the tunnel is up, and the caller's retry
+            // loop with backoff (see statusTimer tick) keeps trying either
+            // way until something responds.
             if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
             {
-                Log("Auto-authenticating with saved credentials...");
+                Log("Auto-mount enabled - checking fileserver reachability...");
                 try
                 {
                     // v7.3: race the same LAN/Tailscale/NetBird candidates the
@@ -454,8 +432,12 @@ namespace FileserverDriveManager
                     var reachableCandidates = raceResults.Where(r => r.Success).ToList();
                     if (reachableCandidates.Count == 0)
                     {
-                        Log("Auto-connect: fileserver not reachable on LAN, Tailscale, or NetBird");
-                        statusLabel.Text = "Fileserver not reachable - VPN may need manual start";
+                        string vpnIP = GetVPNIP();
+                        string vpnNote = (string.IsNullOrEmpty(vpnIP) || vpnIP.Contains("Not Connected"))
+                            ? " (no VPN detected either - if this machine relies on Tailscale/NetBird rather than LAN, check it's connected)"
+                            : "";
+                        Log($"Auto-connect: fileserver not reachable on LAN, Tailscale, or NetBird{vpnNote}");
+                        statusLabel.Text = "Fileserver not reachable - will keep retrying";
                         return false;
                     }
 

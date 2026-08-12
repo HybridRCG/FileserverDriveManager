@@ -67,7 +67,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.16 (Current)
+### v7.5.17 (Current)
+- Auto-mount no longer requires a VPN to be detected before it will even attempt the fileserver connection - previously it hard-gated on `GetVPNIP()` finding Tailscale or NetBird connected (polling for up to 60s) before ever trying the race at all, which completely broke auto-mount for LAN-only users (e.g. physically at the office) with no VPN client running, since it would give up every single time without ever testing the LAN IP. Now goes straight to the LAN/Tailscale/NetBird race, which already handles an absent/not-yet-ready VPN gracefully on its own
+
+### v7.5.16
 - Auto-startup registration now skips entirely (no read or write) when running from a raw build-output folder (`\bin\Debug\` or `\bin\Release\`) rather than an actual install - previously the v7.5.13 self-heal would happily hijack the machine's permanent Windows boot-time auto-start slot to point at an ephemeral dev-build path (e.g. testing via `dev-build-run.bat`), overwriting whatever the real installed copy had registered
 
 ### v7.5.15
