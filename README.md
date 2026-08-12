@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.23
+# Fileserver Drive Manager v7.5.24
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.23 (Current)
+### v7.5.24 (Current)
+- Found the real root cause behind persistent "net use did not respond within 15s" reports on machines that had previously mapped a drive (older app version, this app before, or even a manual Windows map): mounts used `/persistent:yes`, which registers the drive letter with Windows for automatic reconnect at every future logon, entirely independent of this app. That silent background reconnect attempt can race against this app's own explicit mount call for the same drive letter. Now uses `/persistent:no` (this app already handles its own re-mounting far more robustly than Windows' native reconnect does), and proactively clears each configured drive letter's existing reconnect-at-signin registration before mounting, so already-affected machines self-heal rather than needing a manual fix
+
+### v7.5.23
 - Broadened stale-session cleanup to check all three configured fileserver paths (LAN, Tailscale, NetBird), not just whichever one the current attempt is using - Windows only allows one credentialed SMB session per physical server per client at a time, so a session left open via a DIFFERENT path to the same server (e.g. connected via VPN earlier, now trying LAN) could block or hang a fresh connection via the current path even though the two IPs are different strings. Matches a real report of "net use did not respond within 15s" on LAN despite authentication having just succeeded
 
 ### v7.5.22

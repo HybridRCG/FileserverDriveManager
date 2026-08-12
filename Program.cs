@@ -1951,6 +1951,18 @@ namespace FileserverDriveManager
             // succeeded moments earlier).
             await CleanupAllStaleSessions();
 
+            // v7.5.24: also clear each configured drive letter's own
+            // mapping/reconnect registration, not just the server-level
+            // session above. Machines that had a drive mapped previously
+            // (older app version, this app before today's /persistent:no
+            // fix, or even a manual map) can have Windows' own "reconnect at
+            // sign-in" registration for that exact drive letter still
+            // sitting around, which silently races against this app's own
+            // net use call for the same letter at every logon. Best-effort/
+            // bounded, same as CleanupAllStaleSessions - a drive letter with
+            // nothing to clean up is not an error.
+            await Task.WhenAll(drives.Select(d => CleanupDriveLetterMapping(d.DriveLetter)));
+
             int success = 0;
             int failed = 0;
 
@@ -1961,10 +1973,27 @@ namespace FileserverDriveManager
 
                 try
                 {
+                    // v7.5.24: was /persistent:yes - this registers the drive
+                    // letter with Windows for automatic reconnect at every
+                    // future logon, entirely independent of this app. That's
+                    // been directly implicated in mount hangs/failures on
+                    // machines that had previously mapped a drive (via an
+                    // older app version, this app before, or even manually):
+                    // Windows' own silent background reconnect attempt at
+                    // logon can race against this app's own explicit net use
+                    // call for the SAME drive letter, and the app has no
+                    // visibility into or control over that competing attempt.
+                    // This app already re-establishes mappings on its own via
+                    // auto-mount-on-startup (with far more robust retry/race/
+                    // failover logic than Windows' native reconnect has), so
+                    // there's no need for Windows to also try - /persistent:no
+                    // means ending this app process cleanly releases the
+                    // mapping rather than leaving it for the OS to fight over
+                    // at next logon.
                     ProcessStartInfo psi = new ProcessStartInfo
                     {
                         FileName = "net",
-                        Arguments = $"use {drive.DriveLetter} \\\\{fileserverIP}\\{drive.ShareName} /user:{username} {password} /persistent:yes",
+                        Arguments = $"use {drive.DriveLetter} \\\\{fileserverIP}\\{drive.ShareName} /user:{username} {password} /persistent:no",
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
                         UseShellExecute = false,
@@ -2670,6 +2699,39 @@ namespace FileserverDriveManager
                 }
             }
             catch { /* best-effort - a missing session to delete is not an error */ }
+        }
+
+        // v7.5.24: sibling of CleanupStaleSession above, but for a DRIVE
+        // LETTER's mapping/reconnect registration rather than a server-level
+        // session. Deliberately separate rather than reusing
+        // CleanupStaleSession with a different argument shape - that method
+        // always prepends "\\" (correct for a server path like \\192.168.1.26,
+        // wrong for a drive letter like G:), so passing a drive letter
+        // through it would build a malformed "net use \\G: /delete /y".
+        private async Task CleanupDriveLetterMapping(string driveLetter)
+        {
+            try
+            {
+                using (Process process = new Process())
+                {
+                    process.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "net",
+                        Arguments = $"use {driveLetter} /delete /y",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    process.Start();
+                    using (var cts = new System.Threading.CancellationTokenSource(3000))
+                    {
+                        try { await process.WaitForExitAsync(cts.Token); }
+                        catch (OperationCanceledException) { try { process.Kill(); } catch { } }
+                    }
+                }
+            }
+            catch { /* best-effort - a missing mapping to delete is not an error */ }
         }
 
         // v7.5.23: broader version of the above - clears stale sessions
