@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.11
+# Fileserver Drive Manager v7.5.15
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -67,7 +67,22 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.11 (Current)
+### v7.5.15 (Current)
+- Fixed a race condition in v7.5.14's background retry that could make auto-mount succeed or fail intermittently on restart, even with VPN already connected - the initial startup connection attempt wasn't guarded the same way the periodic retries were, so overlapping concurrent attempts could step on each other (one attempt's stale-session cleanup killing a session another was mid-authenticating with, concurrent mount loops racing against the same drive list)
+
+### v7.5.14
+- Auto-mount no longer gives up permanently if the VPN isn't up yet at the fixed 10s startup check - the VPN check now polls for up to 60s, and if that's still not enough, the app keeps retrying quietly in the background with capped backoff (5s→10s→20s→40s→60s) until it connects. Removes the need for any boot-ordering trick against Tailscale/NetBird - the app just waits the VPN out, however long it takes
+
+### v7.5.13
+- Auto-startup registry path now self-heals on every launch instead of being written once and never revisited - if the install location ever moves (e.g. upgrading between installer generations with different install folders), the stale `HKCU...\Run` entry is detected and corrected automatically rather than silently pointing at a now-missing exe
+
+### v7.5.12
+- Fixed a settings-load bug where a `settings.json` missing the (transient, non-persisted-in-spirit) drive `Status` field - e.g. from an older build, or any hand-edit - would throw and silently wipe the entire saved drive list, even though everything else (credentials, IPs, preferences) loaded fine
+- Auto-connect now falls through every TCP-reachable candidate (not just the fastest) before giving up on startup - a fast port-445 reachability check doesn't guarantee the SMB auth layer is actually ready yet, which was causing auto-authentication to fail right after a race pick even though a manual retry moments later would succeed
+- Added best-effort stale-session cleanup (`net use \\ip /delete`) before every authentication/mount attempt, preventing "System error 1219" (multiple connections using different usernames) and mount hangs caused by leftover sessions from prior failed attempts
+- Live failover checks now back off (up to 30s, capped) instead of re-racing all three paths on every single 5s timer tick when nothing is reachable - cuts log noise and network churn during a real outage without slowing recovery once a path comes back
+
+### v7.5.11
 - Renamed "Save IP" to "Save IP's" in Settings
 
 ### v7.5.10
