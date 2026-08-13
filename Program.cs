@@ -1944,8 +1944,8 @@ namespace FileserverDriveManager
                     // set elsewhere, e.g. right after a fresh manual mount).
                     if (consecutiveFailoverMisses > 0)
                     {
-                        int mountedCount = drives.Count(d => d.Status == "Mounted");
-                        statusLabel.Text = $"Connected via {fileserverIP} - {mountedCount} drives mounted";
+                        int recoveredMountedCount = drives.Count(d => d.Status == "Mounted");
+                        statusLabel.Text = $"Connected via {fileserverIP} - {recoveredMountedCount} drives mounted";
                     }
                     consecutiveFailoverMisses = 0;
                     return;
