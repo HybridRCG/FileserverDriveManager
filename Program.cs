@@ -619,7 +619,16 @@ namespace FileserverDriveManager
             notifyIcon.Text = "Fileserver Drive Manager";
             notifyIcon.ContextMenuStrip = new ContextMenuStrip() { BackColor = AppTheme.BgWhite, ForeColor = AppTheme.TextPrimary };
             notifyIcon.ContextMenuStrip.Items.Add("Show", null, (s, e) => ShowFromTray());
-            notifyIcon.ContextMenuStrip.Items.Add("Exit", null, (s, e) => Application.Exit());
+            notifyIcon.ContextMenuStrip.Items.Add("Exit", null, (s, e) =>
+            {
+                // v7.5.26: same confirmation as the main window's Exit
+                // button, for consistency - this menu item also fully closes
+                // the app (stopping auto-mount/monitoring), not just hides it.
+                var result = MessageBox.Show(
+                    "This will fully close Fileserver Drive Manager, stopping auto-mount and drive monitoring until you start it again.\n\nExit anyway?",
+                    "Confirm Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (result == DialogResult.Yes) Application.Exit();
+            });
             notifyIcon.DoubleClick += (s, e) => ShowFromTray();
             
             this.FormClosing += (s, e) =>
@@ -972,7 +981,27 @@ namespace FileserverDriveManager
             };
             exitButton.FlatAppearance.BorderSize = 0;
             exitButton.ApplyRoundedFilledStyle(AppTheme.Danger, Color.White);
-            exitButton.Click += (s, e) => { isExiting = true; this.Close(); };
+            exitButton.Click += (s, e) =>
+            {
+                // v7.5.26: was an immediate, unconfirmed hard exit - the
+                // native window X button correctly just minimizes to tray
+                // (see FormClosing above), but this button bypassed that
+                // entirely via isExiting, with no visual distinction to warn
+                // the user it does something different. Confirmed real-world:
+                // users clicking Exit expected the same minimize-to-tray
+                // behavior as the X button, and were surprised the app (and
+                // therefore auto-mount/monitoring) actually stopped running.
+                var result = MessageBox.Show(
+                    "This will fully close Fileserver Drive Manager, stopping auto-mount and drive monitoring until you start it again.\n\n" +
+                    "To keep it running in the background, close this window with the X button instead.\n\n" +
+                    "Exit anyway?",
+                    "Confirm Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (result == DialogResult.Yes)
+                {
+                    isExiting = true;
+                    this.Close();
+                }
+            };
 
             buttonPanel.Controls.Add(mountDrivesButton, 0, 0);
             buttonPanel.Controls.Add(settingsButton, 1, 0);
