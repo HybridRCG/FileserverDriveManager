@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.24
+# Fileserver Drive Manager v7.5.25
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,11 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.24 (Current)
+### v7.5.25 (Current)
+- Fixed the status bar getting permanently stuck on "Fileserver unreachable on all configured paths" even after the connection recovered and drives mounted successfully - the live failover check's "still reachable, all good" fast path was completely silent, never writing a positive status to replace a stale error message from an earlier genuine outage (e.g. a laptop booting with no WiFi/VPN yet). Now explicitly reasserts a current, accurate status when recovering from a prior miss
+- Added an "Add to Startup" button in Settings - directly triggers/confirms the same Windows auto-start registration that normally happens automatically on launch, with a visible confirmation message. Useful as a manual fallback/troubleshooting option (e.g. a machine where the app has never actually been launched even once, so the implicit registration never got a chance to run)
+
+### v7.5.24
 - Found the real root cause behind persistent "net use did not respond within 15s" reports on machines that had previously mapped a drive (older app version, this app before, or even a manual Windows map): mounts used `/persistent:yes`, which registers the drive letter with Windows for automatic reconnect at every future logon, entirely independent of this app. That silent background reconnect attempt can race against this app's own explicit mount call for the same drive letter. Now uses `/persistent:no` (this app already handles its own re-mounting far more robustly than Windows' native reconnect does), and proactively clears each configured drive letter's existing reconnect-at-signin registration before mounting, so already-affected machines self-heal rather than needing a manual fix
 
 ### v7.5.23

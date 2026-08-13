@@ -282,12 +282,21 @@ namespace FileserverDriveManager
             this.Activate();
         }
 
-        private void EnableAutoStartup()
+        // v7.5.25: now returns a result string so it can be called from a
+        // user-facing button (Settings > "Add to Windows Startup") in
+        // addition to its original silent call at launch. This is the same
+        // self-heal logic as before - not a new mechanism - just exposed as
+        // something the user can trigger and get direct confirmation from,
+        // for cases where the implicit launch-time registration either
+        // hasn't had a chance to run yet (e.g. an install that's never
+        // actually been manually launched even once) or isn't sticking for
+        // some other reason on a particular machine.
+        private string EnableAutoStartup()
         {
             try
             {
                 string? currentExePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-                if (string.IsNullOrEmpty(currentExePath)) return;
+                if (string.IsNullOrEmpty(currentExePath)) return "Couldn't determine this app's own exe path.";
 
                 // v7.5.16: skip auto-startup registration entirely (don't
                 // read OR write the registry key) when running from a raw
@@ -306,44 +315,53 @@ namespace FileserverDriveManager
                     || currentExePath.Contains(@"\bin\Release\", StringComparison.OrdinalIgnoreCase))
                 {
                     Log($"Skipping auto-startup registration - running from a build-output folder, not an install: {currentExePath}");
-                    return;
+                    return "Skipped - this is a dev/test build, not an installed copy. Auto-start isn't registered for build-output folders.";
                 }
 
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                 {
-                    if (key != null)
-                    {
-                        string registryValue = $"\"{currentExePath}\"";
+                    if (key == null) return "Couldn't open the Windows startup registry key.";
 
-                        // v7.5.13: was "only write if the key doesn't exist yet",
-                        // which meant a stale entry from an older install
-                        // location (e.g. the install directory changed between
-                        // installer versions - confirmed on a real machine
-                        // still pointing at an old x86 "Drive Manager" path
-                        // while the current installer.nsi targets a different
-                        // 64-bit "FileserverDriveManager" path) would NEVER get
-                        // corrected. If that old exe is later removed by an
-                        // uninstall/reinstall, auto-startup silently stops
-                        // working with no error and no log, since this code
-                        // path never runs again for that machine. Now it
-                        // compares against the currently running exe's actual
-                        // path and re-writes whenever they differ, so an
-                        // upgrade or a moved install self-heals on next launch.
-                        object? existingValue = key.GetValue("FileserverDriveManager");
-                        string? existingString = existingValue as string;
-                        if (existingString == null || !string.Equals(existingString, registryValue, StringComparison.OrdinalIgnoreCase))
-                        {
-                            key.SetValue("FileserverDriveManager", registryValue);
-                            Log(existingString == null
-                                ? $"Auto-startup enabled with path: {registryValue}"
-                                : $"Auto-startup path was stale ({existingString}) - corrected to: {registryValue}");
-                        }
+                    string registryValue = $"\"{currentExePath}\"";
+
+                    // v7.5.13: was "only write if the key doesn't exist yet",
+                    // which meant a stale entry from an older install
+                    // location (e.g. the install directory changed between
+                    // installer versions - confirmed on a real machine
+                    // still pointing at an old x86 "Drive Manager" path
+                    // while the current installer.nsi targets a different
+                    // 64-bit "FileserverDriveManager" path) would NEVER get
+                    // corrected. If that old exe is later removed by an
+                    // uninstall/reinstall, auto-startup silently stops
+                    // working with no error and no log, since this code
+                    // path never runs again for that machine. Now it
+                    // compares against the currently running exe's actual
+                    // path and re-writes whenever they differ, so an
+                    // upgrade or a moved install self-heals on next launch.
+                    object? existingValue = key.GetValue("FileserverDriveManager");
+                    string? existingString = existingValue as string;
+                    if (existingString == null)
+                    {
+                        key.SetValue("FileserverDriveManager", registryValue);
+                        Log($"Auto-startup enabled with path: {registryValue}");
+                        return $"Added to Windows startup:\n{currentExePath}";
+                    }
+                    else if (!string.Equals(existingString, registryValue, StringComparison.OrdinalIgnoreCase))
+                    {
+                        key.SetValue("FileserverDriveManager", registryValue);
+                        Log($"Auto-startup path was stale ({existingString}) - corrected to: {registryValue}");
+                        return $"Startup entry was pointing at an old location - corrected to:\n{currentExePath}";
+                    }
+                    else
+                    {
+                        return $"Already set to start with Windows:\n{currentExePath}";
                     }
                 }
             }
             catch (Exception ex)
             {
                 Log("Error enabling auto-startup: " + ex.Message);
+                return "Couldn't update the Windows startup entry: " + ex.Message;
             }
         }
 
@@ -1483,10 +1501,19 @@ namespace FileserverDriveManager
             mainLayout.Controls.Add(networkBox, 0, 0);
 
             // Branding Buttons
-            TableLayoutPanel brandingPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Padding = new Padding(0) };
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
+            // v7.5.25: 4 columns now (was 3) - added "Add to Startup" so
+            // users can directly trigger/confirm Windows auto-start
+            // registration on demand, rather than relying purely on the
+            // implicit launch-time self-heal (EnableAutoStartup() already
+            // runs automatically on every launch - this just exposes the
+            // same logic as something the user can invoke and get visible
+            // confirmation from, e.g. for a machine where the app has never
+            // actually been manually launched even once yet).
+            TableLayoutPanel brandingPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Padding = new Padding(0) };
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
 
             Button logoButton = new Button() { Text = "Change Logo", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
             logoButton.FlatAppearance.BorderSize = 1;
@@ -1498,6 +1525,16 @@ namespace FileserverDriveManager
             iconButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
             iconButton.Click += FaviconButton_Click;
 
+            Button startupButton = new Button() { Text = "Add to Startup", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
+            startupButton.FlatAppearance.BorderSize = 1;
+            startupButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
+            startupButton.Click += (s, ev) =>
+            {
+                string result = EnableAutoStartup();
+                MessageBox.Show(result, "Windows Startup", MessageBoxButtons.OK,
+                    result.StartsWith("Couldn't") ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            };
+
             Button closeButton = new Button() { Text = "Close", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0) };
             closeButton.FlatAppearance.BorderSize = 1;
             closeButton.ApplyRoundedOutlineStyle(AppTheme.TextSecondary);
@@ -1505,7 +1542,8 @@ namespace FileserverDriveManager
 
             brandingPanel.Controls.Add(logoButton, 0, 0);
             brandingPanel.Controls.Add(iconButton, 1, 0);
-            brandingPanel.Controls.Add(closeButton, 2, 0);
+            brandingPanel.Controls.Add(startupButton, 2, 0);
+            brandingPanel.Controls.Add(closeButton, 3, 0);
             mainLayout.Controls.Add(brandingPanel, 0, 1);
 
             // Update Check Section
@@ -1889,6 +1927,26 @@ namespace FileserverDriveManager
                 bool stillReachable = await Task.Run(() => TestFileserverReachability(fileserverIP));
                 if (stillReachable)
                 {
+                    // v7.5.25: was silent here - only ever WROTE the negative
+                    // "unreachable" message below, never a corresponding
+                    // positive one on recovery. Confirmed real-world: a
+                    // laptop booting with no WiFi/VPN yet would get this
+                    // "unreachable" message set (correctly, at that moment),
+                    // but once WiFi+VPN connected and drives mounted
+                    // successfully (via the separate startup-retry path),
+                    // this check could still run afterward, silently see
+                    // "yes, reachable now", and just return - leaving the
+                    // stale error message on screen indefinitely even though
+                    // everything was actually working. Now explicitly
+                    // reasserts a current, accurate status whenever recovering
+                    // from a prior miss (not on every single healthy tick,
+                    // to avoid needlessly overwriting more specific messages
+                    // set elsewhere, e.g. right after a fresh manual mount).
+                    if (consecutiveFailoverMisses > 0)
+                    {
+                        int mountedCount = drives.Count(d => d.Status == "Mounted");
+                        statusLabel.Text = $"Connected via {fileserverIP} - {mountedCount} drives mounted";
+                    }
                     consecutiveFailoverMisses = 0;
                     return;
                 }
