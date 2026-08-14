@@ -1436,7 +1436,7 @@ namespace FileserverDriveManager
         {
             Form settingsForm = new Form();
             settingsForm.Text = "Settings";
-            settingsForm.Size = new Size(600, 665);
+            settingsForm.Size = new Size(600, 710);
             settingsForm.StartPosition = FormStartPosition.CenterParent;
             settingsForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             settingsForm.MaximizeBox = false;
@@ -1444,7 +1444,7 @@ namespace FileserverDriveManager
             settingsForm.BackColor = AppTheme.BgLight;
             settingsForm.ForeColor = AppTheme.TextPrimary;
 
-            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(10) };
+            TableLayoutPanel mainLayout = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(10) };
             // v7 fix: was 160 - too tight once the card header Label (24px)
             // and its top padding (8px) were added on top of what GroupBox
             // used to absorb more compactly via its built-in title, which cut
@@ -1453,6 +1453,9 @@ namespace FileserverDriveManager
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
             // v7.5.18: dedicated row for the update-check panel, between the
             // branding buttons and the Information card.
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
+            // v7.5.19: dedicated row for the LearnerNumberAutoFill sync
+            // button, between the update-check panel and the Information card.
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
@@ -1729,6 +1732,100 @@ namespace FileserverDriveManager
             // CheckForUpdateAsync/RunUpdateCheck, so this is safe to not await.
             _ = RunUpdateCheck();
 
+            // LearnerNumberAutoFill Sync Section
+            // v7.5.19: robocopy-mirrors G:\LearnerNumberAutoFill into
+            // C:\ProgramData\LearnerNumberAutoFill. Only makes sense (and is
+            // only safe to run) when G: is actually mapped to the General
+            // share AND currently mounted - otherwise "G:\LearnerNumberAutoFill"
+            // either doesn't exist, or (worse) resolves to whatever a
+            // different share happens to have mounted on G: on that machine.
+            // The check is against `drives` (this machine's own mappings),
+            // re-validated at click time too since Settings can sit open
+            // while state changes underneath it (failover, disconnect, etc.).
+            TableLayoutPanel syncPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0) };
+            syncPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
+            syncPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+
+            Label syncStatusLabel = new Label() { Text = "Learner Number AutoFill sync", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = AppTheme.TextSecondary, AutoEllipsis = true };
+            Button syncButton = new Button() { Text = "Sync Now", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(5, 0, 0, 0) };
+            syncButton.FlatAppearance.BorderSize = 1;
+
+            bool IsGeneralDriveReady() =>
+                drives.Any(d => d.DriveLetter == "G:" && d.ShareName == "General" && d.Status == "Mounted");
+
+            void RefreshSyncButtonState()
+            {
+                bool ready = IsGeneralDriveReady();
+                syncButton.Enabled = ready;
+                syncButton.Cursor = ready ? Cursors.Hand : Cursors.No;
+                syncButton.ApplyRoundedOutlineStyle(ready ? AppTheme.Accent : AppTheme.MutedText);
+                syncStatusLabel.Text = ready
+                    ? "Learner Number AutoFill sync"
+                    : "Learner Number AutoFill sync (needs G: mapped to General, mounted)";
+            }
+            RefreshSyncButtonState();
+
+            syncButton.Click += (s, ev) =>
+            {
+                if (!IsGeneralDriveReady())
+                {
+                    RefreshSyncButtonState();
+                    MessageBox.Show("G: must be mapped to the General share and currently mounted before syncing.", "Drive Not Ready", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                syncButton.Enabled = false;
+                syncButton.Text = "Syncing...";
+                try
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "robocopy",
+                        Arguments = "\"G:\\LearnerNumberAutoFill\" \"C:\\ProgramData\\LearnerNumberAutoFill\" /MIR",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    using var proc = Process.Start(psi)!;
+                    string procOutput = proc.StandardOutput.ReadToEnd();
+                    string procError = proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+
+                    // Robocopy exit codes 0-7 all indicate success (files
+                    // copied/skipped/extra-removed); 8+ means at least one
+                    // failure occurred.
+                    Log($"LearnerNumberAutoFill sync: robocopy exit code {proc.ExitCode}");
+                    if (proc.ExitCode >= 8)
+                    {
+                        Log($"LearnerNumberAutoFill sync stderr: {procError}");
+                    }
+
+                    if (proc.ExitCode < 8)
+                    {
+                        MessageBox.Show($"Sync complete (robocopy exit code {proc.ExitCode}).", "Sync Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"Sync failed - robocopy exit code {proc.ExitCode}. See View Logs for details.", "Sync Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"LearnerNumberAutoFill sync error: {ex.Message}");
+                    MessageBox.Show($"Error running sync: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    syncButton.Text = "Sync Now";
+                    RefreshSyncButtonState();
+                }
+            };
+
+            syncPanel.Controls.Add(syncStatusLabel, 0, 0);
+            syncPanel.Controls.Add(syncButton, 1, 0);
+            mainLayout.Controls.Add(syncPanel, 0, 3);
+
             // Information Section
             // v7 "full tier": Panel with rounded border + separate header, same
             // treatment as networkBox above.
@@ -1747,7 +1844,7 @@ namespace FileserverDriveManager
             };
             infoBox.Controls.Add(infoText);
             infoBox.Controls.Add(infoHeader);
-            mainLayout.Controls.Add(infoBox, 0, 3);
+            mainLayout.Controls.Add(infoBox, 0, 4);
 
             settingsForm.Controls.Add(mainLayout);
             settingsForm.ShowDialog();
