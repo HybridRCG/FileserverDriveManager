@@ -3092,6 +3092,118 @@ namespace FileserverDriveManager
                 .Distinct()
                 .ToList();
             await Task.WhenAll(ips.Select(CleanupStaleSession));
+
+            // v7.5.33: the per-IP cleanup above only matches a session
+            // registered under the exact "\\ip" name. Windows does NOT use
+            // that name for a session already mapped to a drive letter or a
+            // specific share path (e.g. G: -> \\ip\General) - it's tracked
+            // under the drive letter or the full share path instead, so
+            // "net use \\ip /delete /y" against it does nothing.
+            // Confirmed real case: G: and Z: mapped to this server under
+            // stale/different credentials survived the cleanup above
+            // entirely and kept producing System error 1219 on every retry;
+            // running "net use \\ip /delete /y" against those same live
+            // entries manually failed with "The network connection could
+            // not be found" for exactly this reason. This enumerates net
+            // use's actual current sessions and deletes each one that
+            // points at a configured server IP, by whatever exact local
+            // name (drive letter or bare UNC path) Windows is tracking it
+            // under, regardless of which credentials or which drive letter
+            // it's sitting on.
+            await CleanupAllSessionsToConfiguredServers(ips);
+        }
+
+        private async Task CleanupAllSessionsToConfiguredServers(List<string> ips)
+        {
+            if (ips == null || ips.Count == 0) return;
+
+            string output;
+            try
+            {
+                using (Process listProcess = new Process())
+                {
+                    listProcess.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "net",
+                        Arguments = "use",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    listProcess.Start();
+                    output = await listProcess.StandardOutput.ReadToEndAsync();
+                    using (var cts = new System.Threading.CancellationTokenSource(3000))
+                    {
+                        try { await listProcess.WaitForExitAsync(cts.Token); }
+                        catch (OperationCanceledException) { try { listProcess.Kill(); } catch { } }
+                    }
+                }
+            }
+            catch { return; /* best-effort - can't list, so skip proactive cleanup this round */ }
+
+            // Each session line looks like:
+            //   OK           G:        \\192.168.1.26\General    Microsoft Windows Network
+            // or, for an unnamed/administrative session with no drive letter:
+            //   OK                     \\192.168.1.26\IPC$       Microsoft Windows Network
+            // The local drive letter is optional/blank in the second case,
+            // so it's captured as such rather than assumed present.
+            var lineRegex = new System.Text.RegularExpressions.Regex(
+                @"^(OK|Disconnected|Unavailable)\s+([A-Za-z]:)?\s*(\\\\\S+)",
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+
+            var deleteTargets = new List<string>();
+            foreach (System.Text.RegularExpressions.Match m in lineRegex.Matches(output))
+            {
+                string localName = m.Groups[2].Success ? m.Groups[2].Value : null;
+                string remotePath = m.Groups[3].Value;
+
+                bool matchesConfiguredServer = ips.Any(ip =>
+                    remotePath.StartsWith($@"\\{ip}\", StringComparison.OrdinalIgnoreCase) ||
+                    remotePath.Equals($@"\\{ip}", StringComparison.OrdinalIgnoreCase));
+                if (!matchesConfiguredServer) continue;
+
+                // Delete by whichever identifier net use actually
+                // recognizes for this specific entry: the drive letter if
+                // it's mapped to one, otherwise the exact remote UNC path.
+                deleteTargets.Add(!string.IsNullOrEmpty(localName) ? localName : remotePath);
+            }
+
+            if (deleteTargets.Count > 0)
+            {
+                Log($"Clearing {deleteTargets.Count} existing session(s) to configured fileserver: {string.Join(", ", deleteTargets)}");
+            }
+
+            foreach (var target in deleteTargets)
+            {
+                await DeleteNetUseEntry(target);
+            }
+        }
+
+        private async Task DeleteNetUseEntry(string target)
+        {
+            try
+            {
+                using (Process process = new Process())
+                {
+                    process.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "net",
+                        Arguments = $"use {target} /delete /y",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    process.Start();
+                    using (var cts = new System.Threading.CancellationTokenSource(3000))
+                    {
+                        try { await process.WaitForExitAsync(cts.Token); }
+                        catch (OperationCanceledException) { try { process.Kill(); } catch { } }
+                    }
+                }
+            }
+            catch { /* best-effort - a missing entry to delete is not an error */ }
         }
 
         private bool TestFileserverReachability(string ip)

@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.28
+# Fileserver Drive Manager v7.5.33
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,23 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.28 (Current)
+### v7.5.33 (Current)
+- Found the real reason `net use \\ip /delete /y` (the app's existing stale-session cleanup, since v7.5.12/v7.5.23) was silently failing to clear a large class of session collisions: Windows tracks a session under its exact local name once it's mapped to a drive letter or a specific share path (e.g. `G:` → `\\ip\General`), not under a bare `\\ip` name - so the old cleanup's delete command simply didn't match those entries at all. Confirmed real-world: a machine with `G:`/`Z:` already mapped to the fileserver under different/stale credentials kept producing "System error 1219" on every single auth attempt for 18+ minutes straight, surviving the existing cleanup entirely; running `net use \\ip /delete /y` manually against those same live entries failed with "The network connection could not be found" for exactly this reason. `CleanupAllStaleSessions()` now enumerates `net use`'s actual current sessions and deletes each one that points at a configured fileserver IP, by whatever exact local name (drive letter or bare UNC path) Windows is tracking it under - catching the collision regardless of which drive letter or credentials it's sitting on
+- `TestFileserverConnection()` (v7.5.29) now logs the real `net use` error text on failure - was previously discarding it entirely and just logging a generic "failed", which is what made the above collision so hard to pin down in the first place
+
+### v7.5.32
+- Settings' Learner Number AutoFill panel now shows a "Last Synced" timestamp next to the sync button, so it's visible at a glance whether a sync has actually run recently rather than needing to open View Logs to check
+
+### v7.5.31
+- The Learner AutoFill sync button now shows a plain-language result ("Synced successfully" / "Sync failed - check logs") instead of the raw robocopy exit code, which is a bitmask where a non-zero value doesn't necessarily mean failure - the raw number was confusing users into thinking a normal "some files copied" result was an error
+
+### v7.5.30
+- Added a Learner Number AutoFill sync button to Settings
+
+### v7.5.29
+- `TestFileserverConnection()` now logs the actual `net use` error text on any authentication failure (e.g. "System error 1219", "System error 1326") instead of a bare generic "failed" - previously the real Windows error was captured into `RedirectStandardError`/`RedirectStandardOutput` but never read or logged, so every failure looked identical in View Logs regardless of cause
+
+### v7.5.28
 - Moved "View Logs" from the main window to Settings - it's purely a troubleshooting tool, not something used in day-to-day operation like the remaining main-window buttons (Mount All, Settings, Tailscale, NetBird, Exit)
 
 ### v7.5.27
