@@ -179,6 +179,10 @@ namespace FileserverDriveManager
         private bool isAuthenticating = false;
         private bool autoMountOnStartup = true;
         private bool darkModeEnabled = false;
+        // v7.5.32: persisted timestamp of the last successful
+        // LearnerNumberAutoFill robocopy sync, shown next to the Sync Now
+        // button in Settings so users know if/when it last actually ran.
+        private DateTime? lastLearnerSyncTime = null;
         private bool isCheckingFailover = false;
         // v7.5.12: backoff state for when NO configured provider is reachable.
         // Without this, the 5s status timer re-raced all three candidates on
@@ -1436,7 +1440,7 @@ namespace FileserverDriveManager
         {
             Form settingsForm = new Form();
             settingsForm.Text = "Settings";
-            settingsForm.Size = new Size(600, 710);
+            settingsForm.Size = new Size(600, 725);
             settingsForm.StartPosition = FormStartPosition.CenterParent;
             settingsForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             settingsForm.MaximizeBox = false;
@@ -1456,7 +1460,9 @@ namespace FileserverDriveManager
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
             // v7.5.19: dedicated row for the LearnerNumberAutoFill sync
             // button, between the update-check panel and the Information card.
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
+            // v7.5.32: bumped from 45 to 60 to fit the "Last synced" line
+            // added underneath the sync button's label.
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             // Network Settings Section
@@ -1742,13 +1748,37 @@ namespace FileserverDriveManager
             // The check is against `drives` (this machine's own mappings),
             // re-validated at click time too since Settings can sit open
             // while state changes underneath it (failover, disconnect, etc.).
-            TableLayoutPanel syncPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0) };
+            TableLayoutPanel syncPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(0) };
             syncPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 65));
             syncPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35));
+            syncPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+            syncPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
 
-            Label syncStatusLabel = new Label() { Text = "Learner Number AutoFill sync", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = AppTheme.TextSecondary, AutoEllipsis = true };
+            Label syncStatusLabel = new Label() { Text = "Learner Number AutoFill sync", Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, ForeColor = AppTheme.TextSecondary, AutoEllipsis = true };
+            Label lastSyncedLabel = new Label() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.TopLeft, ForeColor = AppTheme.MutedText, Font = new Font("Segoe UI", 8F), AutoEllipsis = true };
             Button syncButton = new Button() { Text = "Sync Now", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(5, 0, 0, 0) };
             syncButton.FlatAppearance.BorderSize = 1;
+
+            // v7.5.32: "Last synced" text next to the button, so users (and
+            // Thomas/Estelle specifically) can tell at a glance whether the
+            // sync has ever actually run, without needing to open View Logs.
+            void RefreshLastSyncedLabel()
+            {
+                if (lastLearnerSyncTime == null)
+                {
+                    lastSyncedLabel.Text = "Last synced: never";
+                    return;
+                }
+
+                var elapsed = DateTime.Now - lastLearnerSyncTime.Value;
+                string when;
+                if (elapsed.TotalMinutes < 1) when = "just now";
+                else if (elapsed.TotalMinutes < 60) when = $"{(int)elapsed.TotalMinutes} min ago";
+                else if (elapsed.TotalHours < 24) when = $"{(int)elapsed.TotalHours} hr ago";
+                else when = lastLearnerSyncTime.Value.ToString("dd MMM yyyy, HH:mm");
+                lastSyncedLabel.Text = $"Last synced: {when}";
+            }
+            RefreshLastSyncedLabel();
 
             bool IsGeneralDriveReady() =>
                 drives.Any(d => d.DriveLetter == "G:" && d.ShareName == "General" && d.Status == "Mounted");
@@ -1807,6 +1837,12 @@ namespace FileserverDriveManager
 
                     if (proc.ExitCode < 8)
                     {
+                        // Only a genuinely successful run updates "Last
+                        // synced" - a failed attempt shouldn't make it look
+                        // like the data is fresher than it actually is.
+                        lastLearnerSyncTime = DateTime.Now;
+                        SaveCurrentSettings();
+                        RefreshLastSyncedLabel();
                         MessageBox.Show(syncSummary, "Sync Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     else
@@ -1827,7 +1863,9 @@ namespace FileserverDriveManager
             };
 
             syncPanel.Controls.Add(syncStatusLabel, 0, 0);
+            syncPanel.Controls.Add(lastSyncedLabel, 0, 1);
             syncPanel.Controls.Add(syncButton, 1, 0);
+            syncPanel.SetRowSpan(syncButton, 2);
             mainLayout.Controls.Add(syncPanel, 0, 3);
 
             // Information Section
@@ -2668,6 +2706,15 @@ namespace FileserverDriveManager
                         disconnectNotifyMinutes = settings["disconnectNotifyMinutes"].GetInt32();
                     }
 
+                    if (settings.ContainsKey("lastLearnerSyncTime") && settings["lastLearnerSyncTime"].ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        if (DateTime.TryParse(settings["lastLearnerSyncTime"].GetString(), null,
+                            System.Globalization.DateTimeStyles.RoundtripKind, out DateTime parsedSyncTime))
+                        {
+                            lastLearnerSyncTime = parsedSyncTime;
+                        }
+                    }
+
                     if (settings.ContainsKey("drives"))
                     {
                         // v7.5.12: isolated in its own try/catch. This used to
@@ -2721,6 +2768,7 @@ namespace FileserverDriveManager
                     { "autoMountOnStartup", autoMountOnStartup },
                     { "darkMode", darkModeEnabled },
                     { "disconnectNotifyMinutes", disconnectNotifyMinutes },
+                    { "lastLearnerSyncTime", lastLearnerSyncTime?.ToString("o") ?? "" },
                     { "drives", drives }
                 };
 
