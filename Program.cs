@@ -291,6 +291,50 @@ namespace FileserverDriveManager
         // hasn't had a chance to run yet (e.g. an install that's never
         // actually been manually launched even once) or isn't sticking for
         // some other reason on a particular machine.
+        // v7.5.27: writes/corrects the "StartupApproved" binary flag that
+        // backs Task Manager's Startup Apps enable/disable toggle for this
+        // app's Run-key entry. Format is Windows' own internal convention
+        // (undocumented officially, but well-established): a 12-byte value
+        // where byte[0] == 0x02 means enabled, anything else (0x03 is what
+        // Task Manager writes when a user clicks Disable) means disabled.
+        // Returns a short note ONLY when something was actually changed (an
+        // empty string means nothing needed fixing), so the caller can
+        // append it to the main result message without always being noisy.
+        private string EnsureStartupApproved()
+        {
+            const string startupApprovedPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
+            try
+            {
+                using (var approvedKey = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(startupApprovedPath))
+                {
+                    if (approvedKey == null) return "";
+
+                    object? existing = approvedKey.GetValue("FileserverDriveManager");
+                    byte[]? existingBytes = existing as byte[];
+                    bool isDisabled = existingBytes != null && existingBytes.Length > 0 && existingBytes[0] != 0x02;
+
+                    if (existingBytes == null || isDisabled)
+                    {
+                        byte[] enabledBytes = new byte[12];
+                        enabledBytes[0] = 0x02;
+                        approvedKey.SetValue("FileserverDriveManager", enabledBytes, Microsoft.Win32.RegistryValueKind.Binary);
+                        Log(isDisabled
+                            ? "Startup entry was disabled in Windows' Startup Apps list - re-enabled it"
+                            : "Enabled in Windows' Startup Apps list");
+                        return isDisabled
+                            ? "It was also switched off in Windows' Startup Apps list (Task Manager) - re-enabled that too."
+                            : "";
+                    }
+                    return "";
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Couldn't check/update Windows Startup Apps enabled state: " + ex.Message);
+                return "";
+            }
+        }
+
         private string EnableAutoStartup()
         {
             try
@@ -323,6 +367,7 @@ namespace FileserverDriveManager
                     if (key == null) return "Couldn't open the Windows startup registry key.";
 
                     string registryValue = $"\"{currentExePath}\"";
+                    string baseResult;
 
                     // v7.5.13: was "only write if the key doesn't exist yet",
                     // which meant a stale entry from an older install
@@ -344,18 +389,35 @@ namespace FileserverDriveManager
                     {
                         key.SetValue("FileserverDriveManager", registryValue);
                         Log($"Auto-startup enabled with path: {registryValue}");
-                        return $"Added to Windows startup:\n{currentExePath}";
+                        baseResult = $"Added to Windows startup:\n{currentExePath}";
                     }
                     else if (!string.Equals(existingString, registryValue, StringComparison.OrdinalIgnoreCase))
                     {
                         key.SetValue("FileserverDriveManager", registryValue);
                         Log($"Auto-startup path was stale ({existingString}) - corrected to: {registryValue}");
-                        return $"Startup entry was pointing at an old location - corrected to:\n{currentExePath}";
+                        baseResult = $"Startup entry was pointing at an old location - corrected to:\n{currentExePath}";
                     }
                     else
                     {
-                        return $"Already set to start with Windows:\n{currentExePath}";
+                        baseResult = $"Already set to start with Windows:\n{currentExePath}";
                     }
+
+                    // v7.5.27: the Run key existing and pointing at the right
+                    // path isn't the whole story - Windows 10/11's Task
+                    // Manager "Startup Apps" tab has its OWN separate enabled/
+                    // disabled toggle per entry, stored in a completely
+                    // different registry location. If a user (or Windows
+                    // itself, which sometimes auto-disables startup items it
+                    // flags as slow or unsigned) toggles that off, the Run
+                    // key is untouched and looks perfectly correct, but
+                    // Windows won't actually launch the app at logon.
+                    // Confirmed real-world: "Add to Startup" reported success
+                    // and the Run key was fine, but Task Manager showed
+                    // "Disabled". Re-enabling it here means every launch (and
+                    // every manual "Add to Startup" click) self-heals this
+                    // too, not just the Run key path.
+                    string startupApprovedNote = EnsureStartupApproved();
+                    return string.IsNullOrEmpty(startupApprovedNote) ? baseResult : $"{baseResult}\n\n{startupApprovedNote}";
                 }
             }
             catch (Exception ex)

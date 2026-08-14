@@ -1,4 +1,4 @@
-# Fileserver Drive Manager v7.5.26
+# Fileserver Drive Manager v7.5.27
 
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
@@ -68,7 +68,10 @@ Bumps the version in the `.csproj`, commits, tags, and pushes — GitHub Actions
 
 ## Version History
 
-### v7.5.26 (Current)
+### v7.5.27 (Current)
+- "Add to Startup" (and the automatic launch-time self-heal) now also checks and corrects Windows' separate Startup Apps enabled/disabled toggle, not just the Run key path - confirmed real-world on a Windows 11 laptop where the Run key entry was correct but Task Manager's Startup Apps tab showed it as "Disabled" (a completely different registry location that Windows, or a user, can toggle independently), so the app never actually launched at logon despite everything looking right
+
+### v7.5.26
 - Added a confirmation dialog to the main window's "Exit" button and the tray icon's right-click "Exit" - both previously closed the app immediately and permanently with no warning, while the window's native X button correctly just minimizes to tray. Confirmed real users clicking Exit expected the same minimize-to-tray behavior and were surprised auto-mount/monitoring actually stopped running
 
 ### v7.5.25
