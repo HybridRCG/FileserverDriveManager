@@ -2965,6 +2965,23 @@ namespace FileserverDriveManager
 
                     bool success = process.ExitCode == 0;
 
+                    // v7.5.25: was silently discarding net use's actual output on
+                    // failure, so every failed auth just logged "failed" with no
+                    // way to tell a bad password (1326) apart from the legacy-
+                    // install session collision (1219) or anything else. Confirmed
+                    // real-world case: TCP reachable, saved+typed credentials both
+                    // "failing" for 18+ minutes straight - was actually error 1219
+                    // from a stale session held open by an old legacy x86 install.
+                    if (!success)
+                    {
+                        string stdErr = (await process.StandardError.ReadToEndAsync()).Trim();
+                        string stdOut = (await process.StandardOutput.ReadToEndAsync()).Trim();
+                        string detail = !string.IsNullOrWhiteSpace(stdErr) ? stdErr
+                                       : !string.IsNullOrWhiteSpace(stdOut) ? stdOut
+                                       : $"exit code {process.ExitCode}, no output";
+                        Log($"net use to {fileserverIP} failed: {detail}");
+                    }
+
                     // Clean up the test connection
                     if (success)
                     {
