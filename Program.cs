@@ -161,7 +161,10 @@ namespace FileserverDriveManager
         private Button addDriveButton = null!;
         private Button mountDrivesButton = null!;
         private Button settingsButton = null!;
-        private Button viewLogsButton = null!;
+        // v7.5.28: viewLogsButton removed from here - the field is now local
+        // to the Settings dialog where the button lives (see
+        // SettingsButton_Click), since it's no longer a persistent
+        // main-window control referenced elsewhere.
         private Button tailscaleButton = null!;
         private Button netbirdButton = null!;
         private Button exitButton = null!;
@@ -956,9 +959,13 @@ namespace FileserverDriveManager
             mainLayout.Controls.Add(gridPanel, 0, 2);
 
             // ===== ACTION BUTTONS =====
-            TableLayoutPanel buttonPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 6, RowCount = 1, Margin = new Padding(0, 0, 0, 8) };
-            for (int i = 0; i < 6; i++)
-                buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f/6f));
+            // v7.5.28: was 6 columns including "View Logs" - moved to
+            // Settings instead (see brandingPanel below), since it's purely
+            // a troubleshooting tool, not something used in day-to-day
+            // operation like the remaining 5 buttons here.
+            TableLayoutPanel buttonPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, Margin = new Padding(0, 0, 0, 8) };
+            for (int i = 0; i < 5; i++)
+                buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
 
             mountDrivesButton = new Button() { 
                 Text = "Mount All", 
@@ -988,20 +995,6 @@ namespace FileserverDriveManager
             settingsButton.FlatAppearance.BorderSize = 1;
             settingsButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
             settingsButton.Click += SettingsButton_Click;
-            
-            viewLogsButton = new Button() { 
-                Text = "View Logs", 
-                Dock = DockStyle.Fill, 
-                BackColor = bgLight, 
-                ForeColor = textPrimary, 
-                Font = modernFontBold,
-                Margin = new Padding(2, 0, 2, 0), 
-                Cursor = Cursors.Hand, 
-                FlatStyle = FlatStyle.Flat 
-            };
-            viewLogsButton.FlatAppearance.BorderColor = borderGray;
-            viewLogsButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
-            viewLogsButton.Click += ViewLogsButton_Click;
             
             tailscaleButton = new Button() { 
                 Text = "Tailscale", 
@@ -1067,10 +1060,9 @@ namespace FileserverDriveManager
 
             buttonPanel.Controls.Add(mountDrivesButton, 0, 0);
             buttonPanel.Controls.Add(settingsButton, 1, 0);
-            buttonPanel.Controls.Add(viewLogsButton, 2, 0);
-            buttonPanel.Controls.Add(tailscaleButton, 3, 0);
-            buttonPanel.Controls.Add(netbirdButton, 4, 0);
-            buttonPanel.Controls.Add(exitButton, 5, 0);
+            buttonPanel.Controls.Add(tailscaleButton, 2, 0);
+            buttonPanel.Controls.Add(netbirdButton, 3, 0);
+            buttonPanel.Controls.Add(exitButton, 4, 0);
             mainLayout.Controls.Add(buttonPanel, 0, 3);
 
             // ===== STATUS BAR =====
@@ -1600,11 +1592,15 @@ namespace FileserverDriveManager
             // same logic as something the user can invoke and get visible
             // confirmation from, e.g. for a machine where the app has never
             // actually been manually launched even once yet).
-            TableLayoutPanel brandingPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Padding = new Padding(0) };
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            // v7.5.28: 5 columns now (was 4) - "View Logs" moved here from
+            // the main window, since it's purely a troubleshooting tool
+            // rather than something used in day-to-day operation.
+            TableLayoutPanel brandingPanel = new TableLayoutPanel() { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, Padding = new Padding(0) };
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            brandingPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
 
             Button logoButton = new Button() { Text = "Change Logo", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
             logoButton.FlatAppearance.BorderSize = 1;
@@ -1626,6 +1622,11 @@ namespace FileserverDriveManager
                     result.StartsWith("Couldn't") ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
             };
 
+            Button viewLogsButton = new Button() { Text = "View Logs", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 5, 0) };
+            viewLogsButton.FlatAppearance.BorderSize = 1;
+            viewLogsButton.ApplyRoundedOutlineStyle(AppTheme.Accent);
+            viewLogsButton.Click += ViewLogsButton_Click;
+
             Button closeButton = new Button() { Text = "Close", Dock = DockStyle.Fill, Cursor = Cursors.Hand, FlatStyle = FlatStyle.Flat, Margin = new Padding(0) };
             closeButton.FlatAppearance.BorderSize = 1;
             closeButton.ApplyRoundedOutlineStyle(AppTheme.TextSecondary);
@@ -1634,7 +1635,8 @@ namespace FileserverDriveManager
             brandingPanel.Controls.Add(logoButton, 0, 0);
             brandingPanel.Controls.Add(iconButton, 1, 0);
             brandingPanel.Controls.Add(startupButton, 2, 0);
-            brandingPanel.Controls.Add(closeButton, 3, 0);
+            brandingPanel.Controls.Add(viewLogsButton, 3, 0);
+            brandingPanel.Controls.Add(closeButton, 4, 0);
             mainLayout.Controls.Add(brandingPanel, 0, 1);
 
             // Update Check Section
