@@ -1794,8 +1794,12 @@ namespace FileserverDriveManager
 
                     // Robocopy exit codes 0-7 all indicate success (files
                     // copied/skipped/extra-removed); 8+ means at least one
-                    // failure occurred.
-                    Log($"LearnerNumberAutoFill sync: robocopy exit code {proc.ExitCode}");
+                    // failure occurred. The raw code means nothing to a
+                    // non-technical user though, so parse robocopy's own
+                    // "Files :" summary line for a plain-language count
+                    // instead of ever showing the number itself.
+                    string syncSummary = BuildRobocopySummary(procOutput, proc.ExitCode);
+                    Log($"LearnerNumberAutoFill sync: robocopy exit code {proc.ExitCode} - {syncSummary}");
                     if (proc.ExitCode >= 8)
                     {
                         Log($"LearnerNumberAutoFill sync stderr: {procError}");
@@ -1803,11 +1807,11 @@ namespace FileserverDriveManager
 
                     if (proc.ExitCode < 8)
                     {
-                        MessageBox.Show($"Sync complete (robocopy exit code {proc.ExitCode}).", "Sync Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        MessageBox.Show(syncSummary, "Sync Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     else
                     {
-                        MessageBox.Show($"Sync failed - robocopy exit code {proc.ExitCode}. See View Logs for details.", "Sync Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show($"{syncSummary} See View Logs for details.", "Sync Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
                 catch (Exception ex)
@@ -1860,6 +1864,40 @@ namespace FileserverDriveManager
             {
                 MessageBox.Show("No log file found", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        // v7.5.31: turns robocopy's raw console output into a plain-language
+        // result for non-technical users (exit codes like "1" read as an
+        // error to anyone who doesn't know robocopy's numbering, even though
+        // 0-7 all mean success). Parses robocopy's own end-of-run summary
+        // table, specifically the "Files :" row, which is always formatted
+        // as: Total  Copied  Skipped  Mismatch  FAILED  Extras.
+        private string BuildRobocopySummary(string robocopyOutput, int exitCode)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                robocopyOutput,
+                @"Files\s*:\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)");
+
+            if (match.Success)
+            {
+                int copied = int.Parse(match.Groups[2].Value);
+                int failed = int.Parse(match.Groups[5].Value);
+
+                if (failed > 0)
+                {
+                    return $"Sync finished, but {failed} file{(failed == 1 ? "" : "s")} failed to copy.";
+                }
+                if (copied == 0)
+                {
+                    return "Sync complete - everything was already up to date.";
+                }
+                return $"Sync complete - {copied} file{(copied == 1 ? "" : "s")} copied.";
+            }
+
+            // Fallback in case robocopy's output format changes and the
+            // regex above stops matching - still keep it in plain language
+            // rather than falling back to the raw exit code.
+            return exitCode < 8 ? "Sync complete." : "Sync failed.";
         }
 
         private void TailscaleButton_Click(object? sender, EventArgs e)
