@@ -1,5 +1,16 @@
 # Fileserver Drive Manager v7.5.33
 
+> **Drive Mapper 10 has replaced this app.**
+> Development has moved to **[HybridRCG/DriveMapper](https://github.com/HybridRCG/DriveMapper)**, a rewrite for **Windows and macOS** that adds on-demand file downloads, offline copies, "keep offline" folders, automatic sync back to the server, conflict copies instead of overwrites, and self-updating installers. It keeps the same LAN / Tailscale / NetBird fastest-path racing and drops Learner Number AutoFill.
+>
+> | Download (always the newest version) | |
+> |---|---|
+> | Windows | [Drive-Mapper-Windows-Setup.exe](https://github.com/HybridRCG/DriveMapper/releases/latest/download/Drive-Mapper-Windows-Setup.exe) |
+> | Mac — Apple silicon (M1–M4) | [Drive-Mapper-Mac-Apple-Silicon.dmg](https://github.com/HybridRCG/DriveMapper/releases/latest/download/Drive-Mapper-Mac-Apple-Silicon.dmg) |
+> | Mac — Intel | [Drive-Mapper-Mac-Intel.dmg](https://github.com/HybridRCG/DriveMapper/releases/latest/download/Drive-Mapper-Mac-Intel.dmg) |
+>
+> Uninstall Fileserver Drive Manager v7 before installing Drive Mapper 10, so the two don't map the same drive letters. v7.5.33 below is the final v7 release and gets no further updates.
+
 A Windows desktop application (.NET 8.0) that maps and manages SMB network drives from your fileserver, with VPN-aware auto-mounting across LAN, Tailscale, and NetBird.
 
 ## Features
